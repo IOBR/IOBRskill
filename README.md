@@ -4,6 +4,8 @@ A Claude Code skill for end-to-end tumor microenvironment (TME) analysis of bulk
 
 IOBRskill automates the complete TME analysis pipeline — from data preprocessing and annotation through immune cell deconvolution, signature scoring, statistical analysis, and publication-quality visualization — all through natural language interaction with Claude Code.
 
+![IOBRskill Pipeline Overview](scripts/IOBRskill.png)
+
 ## What It Does
 
 IOBRskill guides Claude Code through a standardized 5-phase TME analysis workflow:
