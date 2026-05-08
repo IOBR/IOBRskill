@@ -1,0 +1,23 @@
+{
+  "skill_name": "IOBRskill",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "帮我用IOBR做一个肿瘤微环境分析，我的数据在 /home/bio/project/expr_matrix.csv，是raw count矩阵，人类样本",
+      "expected_output": "Skill should: check IOBR installation, create project directories (01-script to 05-note), ask about data details and deconvolution method preference, then write 01-data_preprocessing.R script",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我已经有了标准化后的表达矩阵，想用CIBERSORT和MCPcounter两种方法做TME解析，数据在当前目录的 eset.rds",
+      "expected_output": "Skill should: check IOBR, create directories, write 02-tme_deconvolution.R with both CIBERSORT and MCPcounter, save results to 03-tme/",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我想分析肿瘤微环境，包括免疫浸润和受体配体分析，画热图和箱线图",
+      "expected_output": "Skill should trigger on TME keywords, present the full pipeline overview, ask for data source and method preferences, mention LR_cal() for ligand-receptor and visualization functions",
+      "files": []
+    }
+  ]
+}
