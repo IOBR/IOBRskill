@@ -110,6 +110,7 @@ project/
 ├── 03-tme/            # TME deconvolution and signature scoring results
 ├── 04-figs/
 │   ├── *.png/pdf      # All figures (PNG 300dpi + PDF, numbered naming)
+│   ├── kmplot/        # KM survival plots (auto-saved by sig_surv_plot)
 │   └── data/          # Statistical result tables matching figures
 ├── 05-note/
 │   ├── IOBR-pipeline.md           # Analysis plan (generated in Phase 0)
@@ -716,7 +717,7 @@ for (i in seq_along(sig_vars)) {
   sig_surv_plot(input_pdata = tme_pdata, signature = sig_vars[i],
                 time = time_col, status = status_col, time_type = "month",
                 palette = "jama", mini_sig = "score",
-                fig.type = "pdf", save_path = "04-figs", index = i)
+                fig.type = "pdf", save_path = "04-figs/kmplot", index = i)
 }
 ```
 
@@ -853,7 +854,7 @@ project/
 │   ├── Fig05-cor_matrix.png/pdf
 │   ├── Fig06-top10_wilcoxon_boxplot.png/pdf
 │   ├── Fig07-forest_surv.png/pdf
-│   ├── Fig08-km_significant.pdf
+│   ├── Fig08-km_significant.pdf (saved to kmplot/)
 │   ├── Fig09-subtype_heatmap_boxplot.png/pdf
 │   └── data/                        # Statistical result tables
 │       ├── 01-tme_pdata_merged.csv
