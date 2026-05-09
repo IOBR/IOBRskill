@@ -580,6 +580,8 @@ Every figure MUST:
 2. Export as **both** PNG (300dpi) + PDF
 3. Follow the strict ordering below
 
+**IMPORTANT**: Add `pdf(NULL)` at the top of the visualization script to suppress stray `Rplots.pdf` from IOBR internal plot calls. Also clean up at the end: `if (file.exists("Rplots.pdf")) file.remove("Rplots.pdf")`.
+
 #### Fig 01–02: TME Composition Barplots (CIBERSORT + EPIC)
 
 **IMPORTANT**: Only methods that produce cell FRACTION data (CIBERSORT, EPIC) should use `cell_bar_plot()`. ESTIMATE scores (stromal_score, immune_score, etc.) are NOT fractions and should NOT be plotted as barplots.
@@ -674,81 +676,120 @@ box_list <- lapply(seq_len(nrow(top10)), function(i) {
           variable = cat_var, palette = "jama") +
     theme(axis.title = element_text(size = 5),
           axis.text  = element_text(size = 5),
-          plot.title = element_text(size = 5))
+          plot.title = element_text(size = 5),
+          plot.margin = margin(8, 5, 5, 5))
 })
 
-# Arrange as 2×5 grid
+# Arrange as 2×5 grid — height 160mm to show statistical annotations
 p_combined <- wrap_plots(box_list, ncol = 5, nrow = 2)
 
 ggsave("04-figs/Fig06-top10_wilcoxon_boxplot.png", p_combined,
-       width = 250, height = 120, units = "mm", dpi = 300)
+       width = 250, height = 160, units = "mm", dpi = 300)
 ggsave("04-figs/Fig06-top10_wilcoxon_boxplot.pdf", p_combined,
-       width = 250, height = 120, units = "mm")
+       width = 250, height = 160, units = "mm")
 ```
 
 **Note**: `sig_box()` parameter is `palette` (not `palette_group`), and has no `method` parameter — statistical test is auto-selected.
 
-#### Fig 07: Forest Plot — Top 20 Significant per Method
+#### Fig 07a-d: Forest Plots — Grouped by Method
+
+Split survival forest plots into method groups to improve readability and avoid extreme HR values dominating the display:
 
 ```r
-surv_res <- read.csv("04-figs/data/05-surv_results.csv")
+surv_tme <- read.csv("04-figs/data/05-surv_tme_cells.csv")
+surv_sig <- read.csv("04-figs/data/05-surv_signatures.csv")
 
-# Sort by p-value, take top 20
-surv_res <- surv_res[order(surv_res$P), ]
-top20 <- head(surv_res, 20)
+make_forest <- function(data, title, filename, max_n = 20) {
+  data <- data[order(data$P), ]
+  data <- head(data, max_n)
+  if (nrow(data) == 0) return()
+  tryCatch({
+    p <- sig_forest(data = data, signature = "ID", n = max_n,
+                     text.size = 10, max_character = 30)
+    p <- p + ggtitle(title) + theme(plot.title = element_text(size = 12, hjust = 0.5))
+    ggsave(paste0("04-figs/", filename, ".png"), p, width = 10, height = 7, units = "in", dpi = 300)
+    ggsave(paste0("04-figs/", filename, ".pdf"), p, width = 10, height = 7)
+  }, error = function(e) cat("Forest error:", conditionMessage(e), "\n"))
+}
 
-# sig_forest(data, signature) — signature is a COLUMN NAME in data
-p_forest <- sig_forest(data = top20, signature = "ID", n = 20, text.size = 13)
-ggsave("04-figs/Fig07-forest_surv.png", p_forest, width = 180, height = 200, units = "mm", dpi = 300)
-ggsave("04-figs/Fig07-forest_surv.pdf", p_forest, width = 180, height = 200, units = "mm")
+# 07a: CIBERSORT (includes cibersort + cibersort_abs)
+cb_surv <- surv_tme[grepl("CIBERSORT", surv_tme$ID), ]
+make_forest(cb_surv, "CIBERSORT Survival Forest", "Fig07a-forest_cibersort")
+
+# 07b: Other TME methods (MCPcounter, EPIC, quanTIseq, ESTIMATE, IPS, etc.)
+other_surv <- surv_tme[!grepl("CIBERSORT", surv_tme$ID), ]
+make_forest(other_surv, "Other TME Methods Survival Forest", "Fig07b-forest_other_tme")
+
+# 07c: TME signatures (from signature_collection, excluding GO/KEGG/Hallmark)
+gkegg_pattern <- "^HALLMARK_|^KEGG_|^GO_|^REACTOME_"
+tme_sig_surv <- surv_sig[!grepl(gkegg_pattern, surv_sig$ID), ]
+make_forest(tme_sig_surv, "TME Signatures Survival Forest", "Fig07c-forest_tme_signature")
+
+# 07d: GO/KEGG/Hallmark pathways
+gkegg_surv <- surv_sig[grepl(gkegg_pattern, surv_sig$ID), ]
+make_forest(gkegg_surv, "Pathway Survival Forest", "Fig07d-forest_go_kegg")
 ```
 
 **Key notes:**
+- **Split into groups** because mixing extreme HR values (e.g., CIBERSORT_abs ~123000) with normal values causes display issues in `sig_forest()`.
 - **`sig_forest()` signature parameter** — A **column name** in `data` (e.g., `"ID"`), not a vector of names.
 - **`sig_forest()` expects specific column names**: `P`, `HR`, `CI_low_0.95`, `CI_up_0.95` — these come from `batch_surv()` output.
+- **Use `tryCatch`** — some groups may have 0 significant results.
 
 #### Fig 08: KM Plots — p<0.005 Significant Variables
 
 ```r
 # sig_surv_plot() saves its own output — do NOT wrap with ggsave()
-sig_vars <- surv_res$ID[surv_res$P < 0.005]
+# Create kmplot subdirectory first
+dir.create("04-figs/kmplot", showWarnings = FALSE, recursive = TRUE)
+
+# Merge TME + signature survival results
+surv_all <- rbind(surv_tme, surv_sig)
+surv_sorted <- surv_all[order(surv_all$P), ]
+sig_vars <- surv_sorted$ID[surv_sorted$P < 0.005]
+if (length(sig_vars) == 0) sig_vars <- surv_sorted$ID[surv_sorted$P < 0.01]
+
+surv_data <- read.csv("04-figs/data/01-tme_pdata_merged.csv")
 
 for (i in seq_along(sig_vars)) {
-  sig_surv_plot(input_pdata = tme_pdata, signature = sig_vars[i],
+  sig_surv_plot(input_pdata = surv_data, signature = sig_vars[i],
                 time = time_col, status = status_col, time_type = "month",
                 palette = "jama", mini_sig = "score",
-                fig.type = "pdf", save_path = "04-figs/kmplot", index = i)
+                fig.type = "pdf", save_path = "04-figs/kmplot",
+                project = paste0("KM_", i), index = i)
 }
 ```
 
 **Key notes:**
 - **`sig_surv_plot()` / `roc_time()` save their own output** — Do NOT wrap with `ggsave()`. Use their `save_path` / `path` and `fig.type` / `fig_type` parameters.
+- **KM plots saved to `04-figs/kmplot/` subfolder** — each variable generates multiple files (best-cutoff, 3-group, 2-group KM plots + RData).
 - `time_type`: `"day"`, `"month"`, or `"year"`
 - `mini_sig`: `"score"` (continuous, auto-split by median) or `"category"` (already grouped)
 
-#### Fig 09: TME Subtype Heatmap + Representative Boxplot — patchwork Composite
+#### Fig 09: TME Subtype Boxplot
 
 ```r
-# TME subtype heatmap (left panel)
-p_heat <- sig_heatmap(input = tme_scaled[, c("ID", cb_cols)],
-                       group = tme_scaled$TME_subtype,
-                       scale = TRUE, palette = 2, palette_group = "jama")
+# Pick top discriminating cell from wilcoxon results
+wilcox_sorted <- wilcox_res[order(wilcox_res$p.value), ]
+avail_features <- intersect(wilcox_sorted$sig_names, colnames(tme_scaled))
+top_cell <- avail_features[1]
 
-# Representative sig_box per subtype (right panel)
-# Pick top discriminating cell type from markers
-top_marker <- markers[1, "gene"]
-p_box <- sig_box(data = tme_scaled, signature = top_marker,
-                  variable = "TME_subtype", palette = "jama")
+p_box <- sig_box(data = tme_scaled, signature = top_cell,
+                  variable = "TME_subtype", palette = "jama") +
+  theme(axis.title = element_text(size = 6),
+        axis.text  = element_text(size = 5),
+        plot.title = element_text(size = 6),
+        plot.margin = margin(10, 5, 5, 5))
 
-# Combine with patchwork
-p_fig09 <- p_heat + p_box + plot_layout(widths = c(2, 1))
-
-ggsave("04-figs/Fig09-subtype_heatmap_boxplot.png", p_fig09,
-       width = 250, height = 180, units = "mm", dpi = 300)
-ggsave("04-figs/Fig09-subtype_heatmap_boxplot.pdf", p_fig09,
-       width = 250, height = 180, units = "mm")
+# Height 120mm to show statistical annotation
+ggsave("04-figs/Fig09-subtype_boxplot.png", p_box,
+       width = 120, height = 120, units = "mm", dpi = 300)
+ggsave("04-figs/Fig09-subtype_boxplot.pdf", p_box,
+       width = 120, height = 120, units = "mm")
 
 # Clean up stray Rplots.pdf (generated by some IOBR internal plot calls)
+# Also suppress with pdf(NULL) at script start
+pdf(NULL)  # Add at top of visualization script
 if (file.exists("Rplots.pdf")) file.remove("Rplots.pdf")
 ```
 
@@ -853,9 +894,12 @@ project/
 │   ├── Fig04-heatmap_mcpcounter_subtype.png/pdf
 │   ├── Fig05-cor_matrix.png/pdf
 │   ├── Fig06-top10_wilcoxon_boxplot.png/pdf
-│   ├── Fig07-forest_surv.png/pdf
-│   ├── Fig08-km_significant.pdf (saved to kmplot/)
-│   ├── Fig09-subtype_heatmap_boxplot.png/pdf
+│   ├── Fig07a-forest_cibersort.png/pdf
+│   ├── Fig07b-forest_other_tme.png/pdf
+│   ├── Fig07c-forest_tme_signature.png/pdf
+│   ├── Fig07d-forest_go_kegg.png/pdf
+│   ├── kmplot/                        # KM survival plots (auto-saved by sig_surv_plot)
+│   └── Fig09-subtype_boxplot.png/pdf
 │   └── data/                        # Statistical result tables
 │       ├── 01-tme_pdata_merged.csv
 │       ├── 02-tme_scaled.csv
