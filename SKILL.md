@@ -284,6 +284,7 @@ write.csv(pdata, file = "02-input/pdata.csv")
 | Method | Cell Types | Best For |
 |--------|-----------|----------|
 | `"cibersort"` | 22 (LM22) | Gold standard, comprehensive |
+| `"cibersort_abs"` | 22 (LM22) | CIBERSORT absolute mode (fraction-independent) |
 | `"mcpcounter"` | 8 populations | Quick, stromal + immune |
 | `"epic"` | 8 incl. cancer cells | Tumor purity |
 | `"xcell"` | 64 types | Broadest coverage (slow) |
@@ -292,7 +293,7 @@ write.csv(pdata, file = "02-input/pdata.csv")
 | `"quantiseq"` | 10 incl. M1/M2 | Macrophage polarization |
 | `"ips"` | 4 axes | Immunotherapy response |
 
-Recommended: CIBERSORT + MCPcounter + ESTIMATE (most cited). For comprehensive analysis, run all 8 methods and merge.
+Recommended: CIBERSORT + MCPcounter + ESTIMATE (most cited). For comprehensive analysis, run all 9 methods and merge.
 
 #### Single-method usage:
 ```r
@@ -300,12 +301,14 @@ tme_result <- deconvo_tme(eset = eset, method = "cibersort", arrays = FALSE, per
 write.csv(tme_result, file = "03-tme/tme_cibersort.csv")
 ```
 
-#### Full 8-method deconvolution + merge (production workflow):
+#### Full 9-method deconvolution + merge (production workflow):
 ```r
 # Each method may take 1-5 minutes depending on sample size
 # Use tryCatch for each method — some may fail on certain datasets
 cibersort <- tryCatch(deconvo_tme(eset = eset, method = "cibersort",
                                    arrays = FALSE, perm = 1000), error = function(e) NULL)
+cibersort_abs <- tryCatch(deconvo_tme(eset = eset, method = "cibersort_abs",
+                                       arrays = FALSE, perm = 1000), error = function(e) NULL)
 epic      <- tryCatch(deconvo_tme(eset = eset, method = "epic",
                                    arrays = FALSE), error = function(e) NULL)
 mcp       <- tryCatch(deconvo_tme(eset = eset, method = "mcpcounter"), error = function(e) NULL)
@@ -319,7 +322,7 @@ quantiseq <- tryCatch(deconvo_tme(eset = eset, method = "quantiseq",
 ips       <- tryCatch(deconvo_tme(eset = eset, method = "ips", plot = FALSE), error = function(e) NULL)
 
 # Merge all results by sample ID using base R merge()
-results_list <- list(cibersort, mcp, xcell, epic, estimate, quantiseq, timer, ips)
+results_list <- list(cibersort, cibersort_abs, mcp, xcell, epic, estimate, quantiseq, timer, ips)
 results_list <- results_list[!sapply(results_list, is.null)]
 
 tme_combine <- results_list[[1]]
@@ -536,6 +539,8 @@ Correlation matrix of all TME variables:
 
 ```r
 # batch_cor(data, target, feature, method) — correlates one target vs multiple features
+# NOTE: batch_cor() returns target-vs-each-feature, NOT a pairwise matrix.
+# For a full pairwise correlation matrix, use base R cor() instead (see below).
 # Key immune cells as target, all TME cells as features
 key_cells <- c("T_cells_CD8_CIBERSORT", "Macrophages_M1_CIBERSORT")
 cor_all <- data.frame()
@@ -576,6 +581,8 @@ Every figure MUST:
 
 #### Fig 01–02: TME Composition Barplots (CIBERSORT + EPIC)
 
+**IMPORTANT**: Only methods that produce cell FRACTION data (CIBERSORT, EPIC) should use `cell_bar_plot()`. ESTIMATE scores (stromal_score, immune_score, etc.) are NOT fractions and should NOT be plotted as barplots.
+
 ```r
 tme_cb <- read.csv("03-tme/tme_cibersort.csv")
 tme_ep <- read.csv("03-tme/tme_epic.csv")
@@ -603,7 +610,18 @@ ggsave("04-figs/Fig01-barplot_cibersort.png", p1, width = 180, height = 250, uni
 ggsave("04-figs/Fig01-barplot_cibersort.pdf", p1, width = 180, height = 250, units = "mm")
 
 # Repeat for EPIC with EPIC-specific QC filtering
-# ... same pattern, Fig02-barplot_epic ...
+epic_cols <- grep("_EPIC$", colnames(tme_ep), value = TRUE)
+p2 <- cell_bar_plot(input = tme_ep, id = "ID", features = epic_cols,
+                     title = "EPIC TME Composition",
+                     coord_flip = TRUE, palette = 4, legend.position = "right")
+p2 <- p2 + guides(fill = guide_legend(ncol = 1)) +
+     theme(legend.text = element_text(size = 5),
+           legend.key.size = unit(2.5, "mm"),
+           legend.title = element_blank(),
+           plot.title = element_text(size = 10, hjust = 0.5))
+
+ggsave("04-figs/Fig02-barplot_epic.png", p2, width = 180, height = 250, units = "mm", dpi = 300)
+ggsave("04-figs/Fig02-barplot_epic.pdf", p2, width = 180, height = 250, units = "mm")
 ```
 
 #### Fig 03–04: TME Heatmaps by Subtype (CIBERSORT + MCPcounter)
@@ -624,6 +642,10 @@ sig_heatmap(input = tme_scaled[, c("ID", cb_cols, "TME_subtype")],
 
 # MCPcounter heatmap by subtype — same pattern, Fig04
 ```
+
+**sig_heatmap notes:**
+- **Exclude `group` column from `features`** — Use `setdiff(features, "TME_subtype")` to avoid "undefined columns" error.
+- **`sig_heatmap()` may produce `.x/.y` column suffixes** when multiple methods share cell type names (e.g., CIBERSORT + CIBERSORT_abs). Use `grep()` to find actual column names in merged data.
 
 #### Fig 05: TME Correlation Matrix Heatmap
 
@@ -649,7 +671,9 @@ top10 <- head(wilcox_res, 10)
 box_list <- lapply(seq_len(nrow(top10)), function(i) {
   sig_box(data = tme_pdata, signature = top10$feature[i],
           variable = cat_var, palette = "jama") +
-    theme(axis.title = element_text(size = 8))
+    theme(axis.title = element_text(size = 5),
+          axis.text  = element_text(size = 5),
+          plot.title = element_text(size = 5))
 })
 
 # Arrange as 2×5 grid
@@ -722,6 +746,9 @@ ggsave("04-figs/Fig09-subtype_heatmap_boxplot.png", p_fig09,
        width = 250, height = 180, units = "mm", dpi = 300)
 ggsave("04-figs/Fig09-subtype_heatmap_boxplot.pdf", p_fig09,
        width = 250, height = 180, units = "mm")
+
+# Clean up stray Rplots.pdf (generated by some IOBR internal plot calls)
+if (file.exists("Rplots.pdf")) file.remove("Rplots.pdf")
 ```
 
 #### Additional Visualization Functions
@@ -884,6 +911,6 @@ Include a brief summary of key findings below the tree.
 - `references/functions.md` — IOBR function parameter reference
 - `references/palettes.md` — Color palette selection guide
 - `references/iobr_built_in_data.md` — Complete catalog of built-in signatures, annotations, and datasets
-- `references/iobr_pipeline_template.R` — Full production pipeline template (8-method deconvolution + signature + pathway scoring)
+- `references/iobr_pipeline_template.R` — Full production pipeline template (9-method deconvolution + signature + pathway scoring)
 
 Read these when you need specific parameter details, palette options, want to know what signatures are available, or need a complete pipeline template to adapt.
