@@ -632,50 +632,50 @@ ggsave("04-figs/Fig02-barplot_epic.pdf", p2, width = 180, height = 250, units = 
 **Do NOT use `sig_heatmap()`** — it depends on `tidyHeatmap`, only outputs PDF (no PNG), and has `.x/.y` column suffix issues. Use `pheatmap` instead for dual PNG+PDF output with full control.
 
 ```r
-tme_scaled <- read.csv("04-figs/data/02-tme_scaled.csv")
-subtype_df <- read.csv("04-figs/data/03-tme_subtype.csv")
-tme_scaled <- merge(tme_scaled, subtype_df, by = "ID")
+# Reusable helper for subtype heatmaps
+plot_subtype_heatmap <- function(data, cols, subtype_col, title, prefix,
+                                  width = 8, height = 6) {
+  data <- data[order(data[[subtype_col]]), ]
+  mat <- as.matrix(data[, cols])  # data already z-score scaled from Phase 4
+  mat[mat > 2] <- 2; mat[mat < -2] <- -2  # cap
 
-# CIBERSORT — MUST use only cibersort columns (not cibersort_abs)
-tme_cb <- read.csv("03-tme/tme_cibersort.csv")
-cb_cols_raw <- setdiff(colnames(tme_cb), "ID")
-cb_cols_raw <- cb_cols_raw[!grepl("^[Pp][.]|^Correlation|^RMSE", cb_cols_raw)]
-cb_sc <- intersect(cb_cols_raw, colnames(tme_scaled))
-if (length(cb_sc) == 0) cb_sc <- intersect(paste0(cb_cols_raw, ".x"), colnames(tme_scaled))
-cb_sc <- setdiff(cb_sc, "TME_subtype")
+  # Clean .x/.y suffix from column names
+  colnames(mat) <- sub("\\.[xy]$", "", colnames(mat))
 
-# Prepare matrix and annotation
+  rownames(data) <- data$ID
+  ann_row <- data.frame(Subtype = data[[subtype_col]], row.names = data$ID)
+  subtypes <- sort(unique(data[[subtype_col]]))
+  sub_colors <- c("#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4")
+  ann_colors <- list(Subtype = setNames(sub_colors[seq_along(subtypes)], subtypes))
+
+  # Gaps between subtype groups
+  gaps <- cumsum(table(data[[subtype_col]]))[-length(subtypes)]
+
+  for (fmt in c("pdf", "png")) {
+    pheatmap::pheatmap(mat, annotation_row = ann_row, annotation_colors = ann_colors,
+      color = colorRampPalette(c("#2166AC", "white", "#B2182B"))(100),
+      show_rownames = FALSE, cluster_cols = TRUE, cluster_rows = FALSE,
+      gaps_row = gaps, main = title,
+      filename = paste0("04-figs/", prefix, ".", fmt), width = width, height = height, dpi = 300)
+  }
+}
+
+# Fig 03: CIBERSORT — use only cibersort (not cibersort_abs) columns
 hm_data <- tme_scaled[, c("ID", cb_sc, "TME_subtype")]
-hm_data <- hm_data[order(hm_data$TME_subtype), ]
-rownames(hm_data) <- hm_data$ID
-ann_row <- data.frame(TME_subtype = hm_data$TME_subtype, row.names = hm_data$ID)
-hm_mat <- t(scale(t(as.matrix(hm_data[, cb_sc]))))
-hm_mat[hm_mat > 2] <- 2; hm_mat[hm_mat < -2] <- -2  # cap
+plot_subtype_heatmap(hm_data, cb_sc, "TME_subtype",
+  "CIBERSORT TME by Subtype", "Fig03-heatmap_cibersort_subtype")
 
-ann_colors <- list(TME_subtype = c(
-  CTME1 = "#E64B35", CTME2 = "#4DBBD5", CTME3 = "#00A087", CTME4 = "#3C5488"))
-
-# Save PDF + PNG
-pheatmap::pheatmap(hm_mat, annotation_row = ann_row, annotation_colors = ann_colors,
-  color = colorRampPalette(c("#2166AC", "white", "#B2182B"))(100),
-  show_rownames = FALSE, cluster_cols = TRUE, cluster_rows = TRUE,
-  main = "CIBERSORT TME by Subtype",
-  filename = "04-figs/Fig03-heatmap_cibersort_subtype.pdf", width = 8, height = 6)
-pheatmap::pheatmap(hm_mat, annotation_row = ann_row, annotation_colors = ann_colors,
-  color = colorRampPalette(c("#2166AC", "white", "#B2182B"))(100),
-  show_rownames = FALSE, cluster_cols = TRUE, cluster_rows = TRUE,
-  main = "CIBERSORT TME by Subtype",
-  filename = "04-figs/Fig03-heatmap_cibersort_subtype.png", width = 8, height = 6, dpi = 300)
-
-# Fig 04: MCPcounter — same pattern, read from tme_mcpcounter.csv
+# Fig 04: MCPcounter — same helper
+plot_subtype_heatmap(mcp_data, mcp_cols, "TME_subtype",
+  "MCPcounter TME by Subtype", "Fig04-heatmap_mcpcounter_subtype", width = 6, height = 5)
 ```
 
 **pheatmap notes:**
-- **`filename` parameter** — `pheatmap()` saves directly via `filename`, no need for `png()/pdf()` + `dev.off()` wrappers.
-- **Z-score by row** — `t(scale(t(matrix)))` for row-wise z-score. Cap at ±2 for display.
-- **`annotation_row`** — data.frame with rownames matching matrix rownames, for subtype color bar.
-- **CRITICAL: Do NOT use `grep("CIBERSORT")` in merged data** — cibersort + cibersort_abs share cell names, merge creates `.x/.y`. Read from original cibersort CSV instead.
-- **No need for `tidyHeatmap` dependency** — `pheatmap` is lighter and more reliable.
+- **Do NOT re-scale** — data is already z-scored per column (variable) in Phase 4. Just cap at ±2.
+- **`cluster_rows = FALSE`** — samples are ordered by subtype, do NOT cluster rows (would destroy subtype ordering).
+- **`gaps_row`** — `cumsum(table(subtype))` gives the row indices where gaps should appear, visually separating subtypes.
+- **Clean `.x/.y` suffix** — `sub("\\.[xy]$", "", colnames)` removes merge artifacts for display.
+- **CRITICAL: Do NOT use `grep("CIBERSORT")` in merged data** — cibersort + cibersort_abs share cell names. Read column names from original cibersort CSV and match with `.x` suffix fallback.
 
 #### Fig 05: TME Correlation Matrix Heatmap
 
