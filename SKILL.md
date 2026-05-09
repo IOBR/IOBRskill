@@ -673,8 +673,11 @@ hm_data <- tme_scaled[, c("ID", cb_sc, "TME_subtype")]
 plot_subtype_heatmap(hm_data, cb_sc, "TME_subtype",
   "CIBERSORT TME by Subtype", "Fig03-heatmap_cibersort_subtype")
 
-# Fig 04: MCPcounter — same helper
-plot_subtype_heatmap(mcp_data, mcp_cols, "TME_subtype",
+# Fig 04: MCPcounter — MUST use scaled data, not raw CSV
+mcp_sc <- grep("MCPcounter$", colnames(tme_scaled), value = TRUE)
+mcp_sc <- setdiff(mcp_sc, "TME_subtype")
+mcp_hm <- tme_scaled[, c("ID", mcp_sc, "TME_subtype")]
+plot_subtype_heatmap(mcp_hm, mcp_sc, "TME_subtype",
   "MCPcounter TME by Subtype", "Fig04-heatmap_mcpcounter_subtype", width = 6, height = 5)
 ```
 
