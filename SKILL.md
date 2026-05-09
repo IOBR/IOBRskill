@@ -726,12 +726,19 @@ top10 <- head(wilcox_res, 10)
 
 # Generate individual boxplots
 box_list <- lapply(seq_len(nrow(top10)), function(i) {
-  sig_box(data = tme_pdata, signature = top10$feature[i],
-          variable = cat_var, palette = "jama") +
-    theme(axis.title = element_text(size = 5),
-          axis.text  = element_text(size = 5),
-          plot.title = element_text(size = 5),
-          plot.margin = margin(8, 5, 5, 5))
+  p <- sig_box(data = tme_pdata, signature = top10$feature[i],
+               variable = cat_var, palette = "jama")
+  # Halve p-value (GeomSignif) text size — default 0.3 is too large in patchwork
+  for (j in seq_along(p$layers)) {
+    if (inherits(p$layers[[j]]$geom, "GeomSignif") && !is.null(p$layers[[j]]$aes_params$size)) {
+      p$layers[[j]]$aes_params$size <- p$layers[[j]]$aes_params$size / 2
+    }
+  }
+  p + theme(axis.title = element_text(size = 5),
+            axis.text.x = element_text(size = 10),   # 2x x-axis labels for readability
+            axis.text.y = element_text(size = 5),
+            plot.title = element_text(size = 5),
+            plot.margin = margin(8, 5, 5, 5))
 })
 
 # Arrange as 2×5 grid — height 160mm to show statistical annotations
@@ -743,7 +750,10 @@ ggsave("04-figs/Fig06-top10_wilcoxon_boxplot.pdf", p_combined,
        width = 250, height = 160, units = "mm")
 ```
 
-**Note**: `sig_box()` parameter is `palette` (not `palette_group`), and has no `method` parameter — statistical test is auto-selected.
+**sig_box styling rules (MUST follow):**
+- **X-axis labels 2x larger** than other text — groups need to be readable in patchwork composites.
+- **P-value (GeomSignif) text halved** — default `size=0.3` is too large for multi-panel layouts. Divide by 2 via layer modification.
+- `sig_box()` parameter is `palette` (not `palette_group`), and has no `method` parameter — statistical test is auto-selected.
 
 #### Fig 07a-d: Forest Plots — Grouped by Method (Custom ggplot2)
 
