@@ -138,11 +138,15 @@ subgroup_survival(pdata, variable, group, time, status)
 ```
 
 ### `batch_cor()`
-Batch correlation analysis between two sets of continuous variables.
+Batch correlation analysis — correlates one target variable against multiple features.
 ```r
-batch_cor(data, variable1, variable2, method = "spearman")
+batch_cor(data, target, feature, method = c("spearman", "pearson", "kendall"))
 ```
-- `method`: `"pearson"` or `"spearman"`
+- `target`: Column name (string) of the target variable to correlate against
+- `feature`: Vector of column names to correlate with target
+- `method`: `"spearman"` (default), `"pearson"`, or `"kendall"`
+- Returns tibble: `sig_names`, `p.value`, `statistic`, `p.adj`, `log10pvalue`, `stars`
+- **NOT** a pairwise matrix — use `cor()` or `get_cor_matrix()` for full pairwise
 
 ### `batch_pcc()`
 Batch partial correlation coefficient — control for a third variable.
@@ -153,9 +157,11 @@ batch_pcc(data, target, variable, control)
 ### `batch_wilcoxon()`
 Batch Wilcoxon rank-sum test — compare feature distributions between two groups.
 ```r
-batch_wilcoxon(data, feature, variable, group1, group2)
+batch_wilcoxon(data, target = "group", feature = NULL, feature_manipulation = FALSE)
 ```
-- Returns data frame: feature, p-value, adjusted p-value, -log10(p), star rating.
+- `target`: Column name (string) of the grouping variable. Must have exactly 2 levels.
+- `feature`: Character vector of feature column names to test. If NULL, interactive selection.
+- Returns tibble: `sig_names`, `p.value`, `statistic`, `p.adj`, `log10pvalue`, `stars`
 
 ### `iobr_deg()`
 Differential expression analysis (limma or DESeq2), with built-in volcano and heatmap.
@@ -233,12 +239,17 @@ sig_box(data, signature, variable, palette = "nrc", cols = NULL,
 ### Heatmaps
 
 ### `sig_heatmap()`
-Comprehensive heatmap with grouping, scaling, annotation.
+Comprehensive heatmap with grouping, scaling, annotation. Requires `tidyHeatmap` package.
 ```r
-sig_heatmap(input, group, scale = TRUE, palette = 2,
-            palette_group = "jama", size_row = 8,
-            custom_cols = NULL, custom_heatmap_cols = NULL)
+sig_heatmap(input, id = "ID", features, group, condition = NULL,
+            scale = FALSE, palette = 2, palette_group = "jama",
+            size_row = 8, path = NULL, index = NULL)
 ```
+- `features`: Character vector of feature column names to plot (REQUIRED)
+- `group`: **Column name** (string) of grouping variable in `input`, NOT a vector. E.g., `"TME_subtype"`.
+- `path`: Directory to save output (NULL = display only)
+- `index`: Filename prefix for saved output
+- Requires: `install.packages("tidyHeatmap")`
 
 ### Correlation
 

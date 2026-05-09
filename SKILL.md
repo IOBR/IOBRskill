@@ -65,6 +65,9 @@ install.packages("NbClust", repos = "https://cloud.r-project.org")
 
 # For iobr_pca()
 install.packages("FactoMineR", repos = "https://cloud.r-project.org")
+
+# For sig_heatmap() — tidyHeatmap-based heatmap
+install.packages("tidyHeatmap", repos = "https://cloud.r-project.org")
 ```
 
 ### IOBR Built-in Data
@@ -459,8 +462,9 @@ set.seed(123)
 tme_subtype <- tme_cluster(input = tme_scaled, features = cb_cols,
                             id = "ID", method = "kmeans", max.nc = 6)
 
-# Save cluster labels
-subtype_df <- data.frame(ID = tme_scaled$ID, TME_subtype = tme_subtype$consensusClass)
+# tme_cluster returns data.frame with columns: ID, cluster, <cell_cols>
+# Extract cluster assignments and label as TME subtypes
+subtype_df <- data.frame(ID = tme_subtype$ID, TME_subtype = paste0("TME", tme_subtype$cluster))
 write.csv(subtype_df, file = "04-figs/data/03-tme_subtype.csv", row.names = FALSE)
 
 # Find representative TME variables per subtype
@@ -484,8 +488,7 @@ if (length(cat_vars) > 0) {
     lvls <- unique(tme_pdata[[v]])
     lvls <- lvls[!is.na(lvls)]
     if (length(lvls) == 2) {
-      wilcox_res <- batch_wilcoxon(data = tme_pdata, feature = cell_cols,
-                                    variable = v, group1 = lvls[1], group2 = lvls[2])
+      wilcox_res <- batch_wilcoxon(data = tme_pdata, target = v, feature = cell_cols)
       write.csv(wilcox_res,
                 file = paste0("04-figs/data/04-wilcoxon_", v, ".csv"),
                 row.names = FALSE)
@@ -532,19 +535,20 @@ if (length(time_cols) > 0 && length(status_cols) > 0) {
 Correlation matrix of all TME variables:
 
 ```r
-# Correlation matrix among all TME cell columns
-cor_res <- batch_cor(data = tme_pdata, variable1 = cell_cols,
-                      variable2 = cell_cols, method = "spearman")
-write.csv(cor_res, file = "04-figs/data/06-cor_matrix.csv", row.names = FALSE)
-
-# Cross-correlation: TME cells vs signature scores (if available)
-sig_cols <- grep("CIR|score|Score|Sig|signature", colnames(tme_pdata), value = TRUE)
-sig_cols <- setdiff(sig_cols, cell_cols)
-if (length(sig_cols) > 0) {
-  cross_cor <- batch_cor(data = tme_pdata, variable1 = cell_cols,
-                          variable2 = sig_cols, method = "spearman")
-  write.csv(cross_cor, file = "04-figs/data/06-cor_tme_sig.csv", row.names = FALSE)
+# batch_cor(data, target, feature, method) — correlates one target vs multiple features
+# Key immune cells as target, all TME cells as features
+key_cells <- c("T_cells_CD8_CIBERSORT", "Macrophages_M1_CIBERSORT")
+cor_all <- data.frame()
+for (tc in key_cells) {
+  cor_res <- batch_cor(data = tme_pdata, target = tc, feature = cell_cols, method = "spearman")
+  cor_res$target <- tc
+  cor_all <- rbind(cor_all, cor_res)
 }
+write.csv(cor_all, file = "04-figs/data/06-cor_matrix.csv", row.names = FALSE)
+
+# For full pairwise correlation matrix (for heatmap visualization), use base R:
+cor_mat <- cor(tme_pdata[, cell_cols], method = "spearman", use = "pairwise.complete.obs")
+save(cor_mat, file = "04-figs/data/06-cor_matrix_full.RData")
 ```
 
 #### 4e. Other Statistical Functions
@@ -609,14 +613,14 @@ tme_scaled <- read.csv("04-figs/data/02-tme_scaled.csv")
 subtype_df <- read.csv("04-figs/data/03-tme_subtype.csv")
 tme_scaled <- merge(tme_scaled, subtype_df, by = "ID")
 
-# CIBERSORT heatmap by subtype
+# CIBERSORT heatmap by subtype — group = column name string, not vector
 cb_cols <- grep("_CIBERSORT$", colnames(tme_scaled), value = TRUE)
 cb_cols <- setdiff(cb_cols, grep("P[.]value|Correlation|RMSE", cb_cols, value = TRUE))
 
-sig_heatmap(input = tme_scaled[, c("ID", cb_cols)],
-            group = tme_scaled$TME_subtype,
+sig_heatmap(input = tme_scaled[, c("ID", cb_cols, "TME_subtype")],
+            features = cb_cols,
+            group = "TME_subtype",
             scale = TRUE, palette = 2, palette_group = "jama")
-# Save output from sig_heatmap to Fig03
 
 # MCPcounter heatmap by subtype — same pattern, Fig04
 ```
