@@ -727,7 +727,7 @@ top10 <- head(wilcox_res, 10)
 # Generate individual boxplots
 box_list <- lapply(seq_len(nrow(top10)), function(i) {
   sig_box(data = tme_pdata, signature = top10$feature[i],
-          variable = cat_var, palette = "lancet",
+          variable = cat_var, palette = "jama",
           size_of_font = 6, size_of_pvalue = 4) +
     theme(axis.title = element_text(size = 5),
           axis.text.y = element_text(size = 5),
@@ -745,7 +745,7 @@ ggsave("04-figs/Fig06-top10_wilcoxon_boxplot.pdf", p_combined,
 ```
 
 **sig_box native parameters for multi-panel layouts:**
-- `palette = "lancet"` — use lancet color scheme.
+- `palette = "jama"` — supported palettes: `nrc, jama, aaas, jco, paired1-4, accent, set2` (no lancet).
 - `size_of_font = 6` — x-axis group label font size (default 10; too large for patchwork composites).
 - `size_of_pvalue = 4` — p-value text size (default 6; use 3–4 for multi-panel to avoid crowding).
 - `plot.margin = margin(12, 5, 5, 5)` — increased top margin so p-value is not clipped by title.
