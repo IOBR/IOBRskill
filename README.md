@@ -8,25 +8,36 @@ IOBRskill automates the complete TME analysis pipeline — from data preprocessi
 
 ## What It Does
 
-IOBRskill guides Claude Code through a standardized 5-phase TME analysis workflow:
+IOBRskill guides Claude Code through a standardized 6-phase TME analysis workflow:
 
-| Phase | Script | Description |
-|-------|--------|-------------|
-| 1 | `01-data_preprocessing.R` | Data loading, normalization, probe annotation, QC, batch correction |
-| 2 | `02-tme_deconvolution.R` | Immune cell deconvolution (CIBERSORT, MCPcounter, EPIC, xCell, ESTIMATE, TIMER, quanTIseq, IPS) |
-| 3 | `03-signature_analysis.R` | Gene signature scoring (ssGSEA/PCA/Z-score), pathway enrichment, TME subtype clustering |
-| 4 | `04-statistical_analysis.R` | Differential expression, GSEA, ligand-receptor analysis, survival analysis, mutation-TME interaction |
-| 5 | `05-visualization.R` | Nature-style publication figures (dual PNG + PDF format) |
+| Phase | Step | Description |
+|-------|------|-------------|
+| 0 | Plan | Generate `IOBR-pipeline.md` — ASCII tree of all scripts, inputs/outputs, and expected results |
+| 1 | `01-data_preprocessing.R` | Data loading, normalization, probe annotation, QC, batch correction, sample matching, pdata summary |
+| 2 | `02-tme_deconvolution.R` | Immune cell deconvolution (8 methods: CIBERSORT, CIBERSORT-ABS, MCPcounter, EPIC, xCell, ESTIMATE, TIMER, quanTIseq, IPS) |
+| 3 | `03-signature_analysis.R` | Gene signature scoring (ssGSEA/PCA/Z-score), Hallmark/KEGG/GO/Reactome pathway scoring, TME subtype clustering |
+| 4 | `04-statistical_analysis.R` | Merge → scale → cluster → Wilcoxon/Kruskal tests → Cox survival → correlation matrix. All results saved to `04-figs/data/` |
+| 5 | `05-visualization.R` | Nature-style publication figures: Fig01–Fig09 (barplot, heatmap, forest, correlation, boxplot, KM) — PNG 300dpi + PDF |
+| 6 | Wrap-Up Note | Generate `05-note/IOBR-analysis-README.md` with actual output tree, figure count, and key findings summary |
+
+### Decision Points
+
+IOBRskill pauses at key steps to let the user choose:
+
+1. **Phase 1**: Data type (Count/TPM/Array) and species (human/mouse)
+2. **Phase 2**: Deconvolution method(s) — CIBERSORT + MCPcounter + ESTIMATE recommended
+3. **Phase 3**: Scoring method (ssGSEA default) and signature collection
+4. **Phase 5**: Color palette preference
 
 ## Requirements
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI (latest version recommended)
-- R ≥ 4.2.0
-- [IOBR](https://github.com/IOBR/IOBR) R package ≥ 2.2.0
+- R >= 4.2.0
+- [IOBR](https://github.com/IOBR/IOBR) R package >= 2.2.0
 
 ## Installation
 
-### Step 1 — Install the Skill
+### Step 1 -- Install the Skill
 
 Choose **one** of the following methods:
 
@@ -78,7 +89,7 @@ cp -r IOBRskill-main/ /path/to/your/project/IOBRskill
 ```
 </details>
 
-### Step 2 — Install IOBR R Package
+### Step 2 -- Install IOBR R Package
 
 IOBRskill depends on the IOBR R package. Install it in your R environment:
 
@@ -104,7 +115,7 @@ If you plan to use CIBERSORT deconvolution, also install:
 BiocManager::install("preprocessCore")
 ```
 
-### Step 3 — Verify
+### Step 3 -- Verify
 
 Open Claude Code and test the skill:
 
@@ -148,51 +159,98 @@ I want to do a comprehensive TME analysis."
 "I want to analyze ligand-receptor interactions in my TME data"
 ```
 
-### Interactive decision points
-
-IOBRskill will ask you to choose at these key steps:
-
-1. **Data type** — raw counts, TPM, or microarray; human or mouse
-2. **Deconvolution method** — which algorithm(s) to use for TME cell quantification
-3. **Signature scoring** — ssGSEA, PCA, or Z-score method
-4. **Visualization palette** — color scheme for publication figures
-
 ## Output Structure
 
-IOBRskill creates a standardized directory structure. Here is an example from GSE57303 (70 gastric cancer samples, Affymetrix array):
+IOBRskill creates a standardized directory structure. Here is an example from IMvigor210 (bladder cancer immunotherapy cohort, 348 samples, RNA-seq):
 
 ```
-GSE57303/
+IMvigor210/
 ├── 01-script/
-│   ├── 01-data_preprocessing.R       # Data QC, normalization, gene annotation
-│   ├── 02-tme_deconvolution.R        # CIBERSORT + MCPcounter + ESTIMATE
-│   ├── 03-signature_analysis.R       # ssGSEA scoring (TME + IO biomarkers)
-│   ├── 04-statistical_analysis.R     # TME subtyping, correlation analysis
-│   └── 05-visualization.R            # All publication figures
+│   ├── 01-data_preprocessing.R       # Count → TPM, gene annotation, log2, QC
+│   ├── 02-tme_deconvolution.R        # 9-method deconvolution + merge
+│   ├── 03-signature_analysis.R       # ssGSEA: TME signatures + Hallmark + KEGG
+│   ├── 04-statistical_analysis.R     # Merge, scale, cluster, Wilcoxon, survival
+│   └── 05-visualization.R           # Fig01–Fig09 (all figures)
 ├── 02-input/
-│   ├── annotated_eset.csv            # 21,355 genes × 70 samples (annotated)
-│   └── pdata.csv                     # Sample phenotype data
+│   ├── annotated_eset.csv            # Log2-normalized expression (genes x samples)
+│   ├── pdata.csv                     # Sample phenotype data
+│   └── pdata_summary.csv             # Variable type/level summary
 ├── 03-tme/
 │   ├── tme_cibersort.csv             # 22 immune cell fractions per sample
 │   ├── tme_mcpcounter.csv            # 8 cell population scores per sample
 │   ├── tme_estimate.csv              # Stromal/Immune/Tumor purity scores
-│   ├── sig_score_tme.csv             # 165 TME signature scores (ssGSEA)
-│   ├── sig_score_io_biomarkers.csv   # 9 IO biomarker scores
-│   ├── tme_subtype.csv               # 3 TME subtypes (K-means clustering)
-│   └── correlation_results.csv       # Cell-signature Spearman correlations
+│   ├── tme_epic.csv                  # 8 cell types incl. cancer fraction
+│   ├── tme_xcell.csv                 # 64 cell type scores
+│   ├── tme_quantiseq.csv             # 10 cell type fractions
+│   ├── tme_ips.csv                   # 4 immunotherapy response axes
+│   ├── sig_score_tme.csv             # TME signature scores (ssGSEA)
+│   ├── sig_score_pathway.csv         # Hallmark + GO + KEGG + Reactome scores
+│   └── tme_sig_combine.csv           # All results merged by sample ID
 ├── 04-figs/
-│   ├── 01-barplot_cibersort.png/pdf  # CIBERSORT cell composition
-│   ├── 02-heatmap_tme.png/pdf        # TME landscape with subtype annotation
-│   ├── 03-boxplot_immune_cells.png/pdf # Key immune cells by TME subtype
-│   ├── 04-correlation_heatmap.png/pdf  # Cell-signature correlation matrix
-│   └── 05-boxplot_mcpcounter.png/pdf   # MCPcounter cell abundance
+│   ├── Fig01-barplot_cibersort.png/pdf        # CIBERSORT cell composition barplot
+│   ├── Fig02-barplot_epic.png/pdf             # EPIC cell composition barplot
+│   ├── Fig03a-heatmap_cibersort.png/pdf       # CIBERSORT heatmap (z-score)
+│   ├── Fig03b-heatmap_mcpcounter.png/pdf      # MCPcounter heatmap (z-score)
+│   ├── Fig03c-heatmap_xcell.png/pdf           # xCell heatmap (z-score)
+│   ├── Fig04a-forest_cibersort.png/pdf        # CIBERSORT survival forest (if survival)
+│   ├── Fig04b-forest_other_tme.png/pdf        # MCPcounter+EPIC+xCell forest (if survival)
+│   ├── Fig04c-forest_tme_signature.png/pdf    # TME signatures forest (if survival)
+│   ├── Fig04d-forest_go_kegg.png/pdf          # GO/KEGG/Hallmark forest (if survival)
+│   ├── Fig05-cor_matrix.png/pdf               # TME cell correlation matrix heatmap
+│   ├── Fig06a-heatmap_cibersort_subtype.png/pdf  # CIBERSORT heatmap by TME subtype
+│   ├── Fig06b-heatmap_mcpcounter_subtype.png/pdf # MCPcounter heatmap by TME subtype
+│   ├── Fig06c-heatmap_xcell_subtype.png/pdf   # xCell heatmap by TME subtype
+│   ├── Fig06d-km_subtype.png/pdf              # KM plot by TME subtype (if survival)
+│   ├── Fig07a-boxplot_cibersort_subtype.png/pdf   # CIBERSORT subtype boxplots
+│   ├── Fig07b-boxplot_mcpcounter_subtype.png/pdf  # MCPcounter subtype boxplots
+│   ├── Fig07c-boxplot_xcell_subtype.png/pdf   # xCell subtype boxplots
+│   ├── Fig07d-boxplot_tme_signature_subtype.png/pdf # TME signatures subtype boxplots
+│   ├── Fig07e-boxplot_pathway_subtype.png/pdf  # GO/KEGG/Hallmark subtype boxplots
+│   ├── Fig08a-top10_<variable>.png/pdf        # Top 10 differential boxplots (if categorical)
+│   ├── Fig08b-top10_<variable>.png/pdf        # Top 10 differential boxplots (if categorical)
+│   ├── kmplot/                                # KM plots (most/least significant variables)
+│   └── data/                                  # Statistical result tables
+│       ├── 01-tme_pdata_merged.csv
+│       ├── 02-tme_scaled.csv
+│       ├── 03-tme_subtype.csv
+│       ├── 04-diff_<variable>.csv
+│       ├── 05-surv_cibersort.csv
+│       ├── 05-surv_other_tme.csv
+│       ├── 05-surv_tme_signatures.csv
+│       ├── 05-surv_pathways.csv
+│       └── 06-cor_matrix.csv
 ├── 05-note/
-│   └── IOBR-analysis-README.md       # Tree diagram + results interpretation
+│   ├── IOBR-pipeline.md               # Analysis plan (generated in Phase 0)
+│   └── IOBR-analysis-README.md        # Output tree + key findings summary (Phase 6)
 └── 06-log/
-    ├── 01-data_preprocessing.log     # Execution logs per script
+    ├── 01-data_preprocessing.log      # Execution logs with IOBR citation header
     ├── 02-tme_deconvolution.log
-    └── ...
+    ├── 03-signature_analysis.log
+    ├── 04-statistical_analysis.log
+    └── 05-visualization.log
 ```
+
+### Figure Logic
+
+| Condition | Figure | Content |
+|-----------|--------|---------|
+| Always | Fig01–02 | CIBERSORT + EPIC fraction barplots |
+| Always | Fig03a–c | Heatmaps without subtype (CIBERSORT, MCPcounter, xCell) |
+| IF survival data | Fig04a–d | Forest plots (CIBERSORT, other TME, signatures, pathways) |
+| Always | Fig05 | TME cell correlation matrix |
+| Always | Fig06a–c | Heatmaps by TME subtype |
+| IF survival data | Fig06d | KM plot by TME subtype |
+| Always | Fig07a–e | Most positive cell per subtype boxplots |
+| IF categorical vars | Fig08a–b... | Top 10 differential boxplots (Wilcoxon/Kruskal) |
+| IF survival data | Fig09/kmplot/ | 8 KM plots (extreme HR from each group) |
+
+### Key Rules
+
+- **sig_forest**: Must filter `abs(HR) > 10` before passing data -- extreme HR causes blank plots
+- **ALL boxplots**: Use `sig_box()` with fixed params: `palette = "paired1"`, `show_pvalue = TRUE`, `angle_x_text = 60`, `hjust = 1`, `size_of_pvalue = 3`, `size_of_font = 5`
+- **Heatmaps**: Variables as rows, samples as columns, z-score scaled, capped at +/-2
+- **Figures**: Always dual-format PNG (300dpi) + PDF
+- **Citation header**: Every R script and log file must include the IOBR citation
 
 ## Supported Methods
 
@@ -201,6 +259,7 @@ GSE57303/
 | Method | Cell Types | Description |
 |--------|-----------|-------------|
 | CIBERSORT | 22 | Gold standard immune profiling (LM22) |
+| CIBERSORT-ABS | 22 | Absolute mode (fraction-independent) |
 | MCPcounter | 8 | Stromal + immune quantification |
 | EPIC | 8 | Includes cancer cell fraction |
 | xCell | 64 | Broadest cell type coverage |
@@ -213,7 +272,7 @@ GSE57303/
 
 | Method | Description |
 |--------|-------------|
-| ssGSEA | Single-sample GSEA (recommended) |
+| ssGSEA | Single-sample GSEA (recommended, default) |
 | PCA | Principal component analysis |
 | Z-score | Z-score normalization |
 | Integration | Combined method |
@@ -224,6 +283,9 @@ IOBR ships with **323 curated gene signatures** organized into 35+ categories:
 - TME signatures (186): immune checkpoint, T cell exhaustion, EMT, TME scores
 - Hallmark pathways (50)
 - Metabolism pathways (113)
+- GO Biological Process (7,658), GO Cellular Component, GO Molecular Function
+- KEGG pathways (186)
+- Reactome pathways (1,615)
 - Cell-type-specific signatures from CIBERSORT, MCPcounter, EPIC, xCell, quanTIseq
 - Published signatures: Rooney et al, Bindea et al, Li et al, Peng et al, and more
 
@@ -231,27 +293,32 @@ IOBR ships with **323 curated gene signatures** organized into 35+ categories:
 
 | Package | Required | Install |
 |---------|----------|---------|
-| [IOBR](https://github.com/IOBR/IOBR) ≥ 2.2.0 | Yes | `BiocManager::install("IOBR/IOBR")` |
-| R ≥ 4.2.0 | Yes | — |
+| [IOBR](https://github.com/IOBR/IOBR) >= 2.2.0 | Yes | `BiocManager::install("IOBR/IOBR")` |
+| R >= 4.2.0 | Yes | -- |
 | preprocessCore | For CIBERSORT | `BiocManager::install("preprocessCore")` |
+| limSolve | For quanTIseq | `install.packages("limSolve")` |
+| NbClust | For tme_cluster() | `install.packages("NbClust")` |
+| FactoMineR | For iobr_pca() | `install.packages("FactoMineR")` |
 | ggplot2 | For visualization | `install.packages("ggplot2")` |
 | pheatmap | For heatmaps | `install.packages("pheatmap")` |
+| patchwork | For multi-panel figures | `install.packages("patchwork")` |
+| survminer | For KM plots | `install.packages("survminer")` |
 
 ## Skill Structure
 
 ```
 IOBRskill/
-├── SKILL.md                           # Main skill instructions
-├── README.md                          # This file
+├── SKILL.md                               # Main skill instructions (full pipeline)
+├── README.md                              # This file
 ├── evals/
-│   └── evals.json                     # Test cases
+│   └── evals.json                         # Test cases
 ├── references/
-│   ├── functions.md                   # IOBR function parameter reference
-│   ├── palettes.md                    # Color palette selection guide
-│   └── iobr_built_in_data.md          # Built-in data & signature catalog
-└── test/
-    ├── GSE57303_series_matrix.txt.gz  # Test data (gastric cancer array)
-    └── TCGA-STAD.htseq_counts.tsv.gz  # Test data (stomach adenocarcinoma RNA-seq)
+│   ├── functions.md                       # IOBR function parameter reference
+│   ├── palettes.md                        # Color palette selection guide
+│   ├── iobr_built_in_data.md              # Built-in data & signature catalog
+│   └── iobr_pipeline_template.R           # Full production pipeline template
+└── scripts/
+    └── IOBRskill.png                      # Pipeline overview diagram
 ```
 
 ## Links
@@ -260,17 +327,18 @@ IOBRskill/
 - **IOBR GitHub**: [https://github.com/IOBR/IOBR](https://github.com/IOBR/IOBR)
 - **IOBR on CRAN**: [https://cran.r-project.org/package=IOBR](https://cran.r-project.org/package=IOBR)
 - **IOBR Paper (Cell Reports Methods)**: [https://doi.org/10.1016/j.crmeth.2024.100910](https://doi.org/10.1016/j.crmeth.2024.100910)
+- **IOBR Paper (Med Research)**: [https://doi.org/10.1002/mdr2.70001](https://doi.org/10.1002/mdr2.70001)
 - **IOBRskill GitHub**: [https://github.com/IOBR/IOBRskill](https://github.com/IOBR/IOBRskill)
 
 ## Citation
 
 If you use IOBRskill in your research, please cite IOBR:
 
-> Zeng DQ, Fang YR, … , Yu GC, Liao WJ. Enhancing Immuno-Oncology Investigations Through Multidimensional Decoding of Tumour Microenvironment with IOBR 2.0. *Cell Reports Methods*, 2024. [https://doi.org/10.1016/j.crmeth.2024.100910](https://doi.org/10.1016/j.crmeth.2024.100910)
+> Zeng DQ, Fang YR, ... , Yu GC, Liao WJ. Enhancing Immuno-Oncology Investigations Through Multidimensional Decoding of Tumour Microenvironment with IOBR 2.0. *Cell Reports Methods*, 2024. [https://doi.org/10.1016/j.crmeth.2024.100910](https://doi.org/10.1016/j.crmeth.2024.100910)
+>
+> Fang YR, ..., Liao WJ, Zeng DQ. Systematic Investigation of Tumor Microenvironment and Antitumor Immunity With IOBR. *Med Research*, 2025. [https://doi.org/10.1002/mdr2.70001](https://doi.org/10.1002/mdr2.70001)
 
 ## Contact
 
-- **Dongqiang Zeng** — [interlaken@smu.edu.cn](mailto:interlaken@smu.edu.cn)
+- **Dongqiang Zeng** -- [interlaken@smu.edu.cn](mailto:interlaken@smu.edu.cn)
 - **Issues**: [https://github.com/IOBR/IOBRskill/issues](https://github.com/IOBR/IOBRskill/issues)
-
-
