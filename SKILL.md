@@ -424,13 +424,57 @@ Every figure MUST:
 | `get_cor_matrix()` | Correlation matrix heatmap between variable sets | `data, variable1, variable2, method` |
 | `iobr_cor_plot()` | Batch correlation visualization (signature vs signature/phenotype) | `data, signature, target, method` |
 
-##### Survival
+##### Survival Analysis
 | Function | Purpose | Key Parameters |
 |----------|---------|---------------|
-| `sig_surv_plot()` | Kaplan-Meier curves for multiple signatures/genes | `pdata, signature, time, status` |
-| `sig_forest()` | Forest plot for batch_surv results | `input` (from batch_surv) |
-| `roc_time()` | Time-dependent ROC with AUC annotation | `pdata, signature, time, status, time_point` |
-| `sig_roc()` | Multiple ROC curves for binary prediction | `pdata, signature, response` |
+| `sig_surv_plot()` | Single KM curve for one signature/gene | `input_pdata, signature, time, status, time_type, palette, mini_sig` |
+| `batch_sig_surv_plot()` | Batch KM curves for multiple signatures across projects | `input_pdata, signature, id, column_of_project, time, status, time_type, break_month, palette` |
+| `surv_group()` | KM curve comparing high/low groups with risk table | `input_pdata, target_group, ID, levels, time, status, time_type, palette, width, height` |
+| `sig_forest()` | Forest plot for `batch_surv()` results | `data, signature, pvalue, HR, CI_low_0.95, CI_up_0.95, n, color_option` |
+| `roc_time()` | Time-dependent ROC with AUC at multiple time points | `input, vars, time, status, time_point, time_type, palette` |
+| `sig_roc()` | Multiple ROC curves for binary response prediction | `data, response, variables, palette, compare, smooth` |
+
+**Survival visualization templates:**
+
+```r
+# Single KM plot
+sig_surv_plot(input_pdata = pdata, signature = "T_cells_CD8_CIBERSORT",
+              time = "OS_time", status = "OS_status", time_type = "month",
+              palette = "jama", mini_sig = "score")
+
+# Batch KM plots for multiple signatures
+batch_sig_surv_plot(input_pdata = pdata, signature = sig_group$immu_checkpoints,
+                     time = "OS_time", status = "OS_status", time_type = "month",
+                     palette = "jama", fig_type = "pdf",
+                     save_path = "04-figs/batch_km")
+
+# KM with risk table (auto split by median)
+surv_group(input_pdata = pdata, target_group = "TMEscoreA_CIR",
+           levels = c("High", "Low"), time = "OS_time", status = "OS_status",
+           palette = "jama", width = 6, height = 6.5,
+           save_path = "04-figs/surv_group.pdf")
+
+# Forest plot from batch_surv results
+surv_res <- batch_surv(pdata = pdata, tme_data = tme_result,
+                        time = "OS_time", status = "OS_status")
+sig_forest(data = surv_res, n = 20, color_option = 1, text.size = 13)
+
+# Time-dependent ROC
+roc_time(input = pdata, vars = c("T_cells_CD8_CIBERSORT", "TMEscoreA_CIR"),
+         time = "OS_time", status = "OS_status",
+         time_point = c(12, 36, 60), time_type = "month", palette = "jama")
+
+# Binary ROC comparison
+sig_roc(data = pdata, response = "response",
+        variables = c("TME_subtype", "T_cells_CD8_CIBERSORT"),
+        compare = TRUE, palette = "jama")
+```
+
+**Key notes:**
+- `time_type`: `"day"`, `"month"`, or `"year"` — tells IOBR how to interpret `time` column
+- `break_month`: `"auto"` or numeric vector for axis breaks
+- `mini_sig`: `"score"` (continuous, auto-split by median) or `"category"` (already grouped)
+- `sig_forest()` accepts output from `batch_surv()` directly — column names `P`, `HR`, `CI_low_0.95`, `CI_up_0.95` are expected
 
 ##### Dimensionality Reduction
 | Function | Purpose | Key Parameters |

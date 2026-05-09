@@ -260,28 +260,60 @@ iobr_cor_plot(data, signature, target, method = "spearman")
 ### Survival
 
 ### `sig_surv_plot()`
-Kaplan-Meier curves for multiple signatures/genes.
+Single Kaplan-Meier curve for one signature/gene.
 ```r
-sig_surv_plot(pdata, signature, time, status, group = NULL,
-              palette_group = "jama")
+sig_surv_plot(input_pdata, signature, project = "KM", ID = "ID",
+              time = "time", status = "status", time_type = "month",
+              break_month = "auto", cols = NULL, palette = "jama",
+              mini_sig = "score", fig.type = "png", save_path = NULL, index = 1)
+```
+- `mini_sig`: `"score"` (continuous, auto-split by median) or `"category"` (already grouped)
+- `time_type`: `"day"`, `"month"`, or `"year"`
+
+### `batch_sig_surv_plot()`
+Batch KM curves for multiple signatures, optionally across multiple projects.
+```r
+batch_sig_surv_plot(input_pdata, signature, id = "ID",
+                     column_of_project = "ProjectID", project = NULL,
+                     time = "time", status = "status", time_type = "day",
+                     break_month = "auto", palette = "jama", cols = NULL,
+                     mini_sig = "score", save_path, show_col = TRUE, fig_type = "pdf")
+```
+
+### `surv_group()`
+KM curve comparing high/low groups with risk table.
+```r
+surv_group(input_pdata, target_group, ID = "ID", levels = c("High", "Low"),
+           reference_group = NULL, project = NULL, time = "time", status = "status",
+           time_type = "month", break_month = "auto", cols = NULL, palette = "jama",
+           mini_sig = "score", save_path = NULL, fig.type = "pdf", index = 1,
+           width = 6, height = 6.5, font.size.table = 3)
 ```
 
 ### `sig_forest()`
-Forest plot for batch_surv results.
+Forest plot for `batch_surv()` results.
 ```r
-sig_forest(input)  # input = batch_surv() output
+sig_forest(data, signature, pvalue = "P", HR = "HR",
+           CI_low_0.95 = "CI_low_0.95", CI_up_0.95 = "CI_up_0.95",
+           n = 10, max_character = 25, discrete_width = 35,
+           color_option = 1, cols = NULL, text.size = 13)
 ```
 
 ### `roc_time()`
-Time-dependent ROC curves with AUC annotation.
+Time-dependent ROC curves with AUC annotation at multiple time points.
 ```r
-roc_time(pdata, signature, time, status, time_point = c(12, 36, 60))
+roc_time(input, vars, time = "time", status = "status", time_point = 12,
+         time_type = "month", palette = "jama", cols = "normal", seed = 1234,
+         show_col = FALSE, path = NULL, main = "PFS", index = 1,
+         fig.type = "pdf", width = 5, height = 5.2)
 ```
 
 ### `sig_roc()`
 Multiple ROC curves for binary response prediction.
 ```r
-sig_roc(pdata, signature, response)
+sig_roc(data, response, variables, fig.path = NULL, main = NULL,
+        file.name = NULL, palette = "jama", cols = NULL, alpha = 1,
+        compare = FALSE, smooth = TRUE, compare_method = "bootstrap", boot.n = 100)
 ```
 
 ### Dimensionality Reduction
