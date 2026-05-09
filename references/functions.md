@@ -366,3 +366,27 @@ Binary classification model.
 BinomialModel(x, y, scale = TRUE, seed = 42,
               train_ratio = 0.7, nfold = 5)
 ```
+
+---
+
+## Custom Helper Functions
+
+### `find_top_feature_per_subtype()`
+For each TME subtype, find the cell type with highest mean scaled z-score. Used in Fig09 to select the most representative feature per subtype for boxplot visualization.
+
+```r
+find_top_feature_per_subtype <- function(data, cell_cols, subtype_col = "TME_subtype") {
+  subtypes <- sort(unique(data[[subtype_col]]))
+  result <- character(0)
+  for (st in subtypes) {
+    st_data <- data[data[[subtype_col]] == st, cell_cols, drop = FALSE]
+    cell_means <- colMeans(st_data, na.rm = TRUE)
+    result[st] <- names(sort(cell_means, decreasing = TRUE))[1]
+  }
+  return(result)
+}
+```
+- `data`: scaled data frame with subtype column and cell columns
+- `cell_cols`: character vector of cell column names to search
+- `subtype_col`: name of the subtype grouping column (default `"TME_subtype"`)
+- Returns: named character vector — `c(C1 = "top_cell_col", C2 = "top_cell_col", ...)`

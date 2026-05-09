@@ -728,7 +728,8 @@ top10 <- head(wilcox_res, 10)
 box_list <- lapply(seq_len(nrow(top10)), function(i) {
   sig_box(data = tme_pdata, signature = top10$feature[i],
           variable = cat_var, palette = "paired1",
-          size_of_font = 6, size_of_pvalue = 4) +
+          show_pvalue = TRUE, size_of_pvalue = 5,
+          hjust = 1, angle_x_text = 60, size_of_font = 8) +
     theme(axis.title = element_text(size = 5),
           axis.text.y = element_text(size = 5),
           plot.title = element_text(size = 5),
@@ -744,10 +745,10 @@ ggsave("04-figs/Fig06-top10_wilcoxon_boxplot.pdf", p_combined,
        width = 250, height = 220, units = "mm")
 ```
 
-**sig_box native parameters for multi-panel layouts:**
+**sig_box parameters for multi-panel layouts (MUST follow):**
 - `palette = "paired1"` — supported palettes: `nrc, jama, aaas, jco, paired1-4, accent, set2` (no lancet).
-- `size_of_font = 6` — x-axis group label font size (default 10; too large for patchwork composites).
-- `size_of_pvalue = 4` — p-value text size (default 6; use 3–4 for multi-panel to avoid crowding).
+- `show_pvalue = TRUE, size_of_pvalue = 5` — show p-value annotation.
+- `hjust = 1, angle_x_text = 60, size_of_font = 8` — angled x-axis labels for readability.
 - `plot.margin = margin(12, 5, 5, 5)` — increased top margin so p-value is not clipped by title.
 - `sig_box()` has no `method` parameter — statistical test is auto-selected.
 
@@ -882,7 +883,23 @@ for (i in seq_along(sig_vars)) {
 
 #### Fig 09: TME Subtype Boxplots — Top Feature Per Subtype, Patchwork Composite
 
-For each TME subtype, find the CIBERSORT cell type with highest mean (scaled), then create one `sig_box` per subtype and combine with patchwork.
+For each TME subtype, find the CIBERSORT cell type with highest mean z-score, then create one `sig_box` per subtype and combine with patchwork.
+
+**Helper function** — `find_top_feature_per_subtype`:
+```r
+# For each TME subtype, find the cell type with highest mean (scaled z-score)
+# Returns named vector: subtype -> column name
+find_top_feature_per_subtype <- function(data, cell_cols, subtype_col = "TME_subtype") {
+  subtypes <- sort(unique(data[[subtype_col]]))
+  result <- character(0)
+  for (st in subtypes) {
+    st_data <- data[data[[subtype_col]] == st, cell_cols, drop = FALSE]
+    cell_means <- colMeans(st_data, na.rm = TRUE)
+    result[st] <- names(sort(cell_means, decreasing = TRUE))[1]
+  }
+  return(result)
+}
+```
 
 ```r
 # Read CIBERSORT columns from original file
@@ -906,7 +923,8 @@ box09_list <- lapply(subtypes, function(st) {
   clean_name <- sub("\\.[xy]$", "", col)
   sig_box(data = tme_sc, signature = col,
           variable = "TME_subtype", palette = "paired1",
-          size_of_font = 6, size_of_pvalue = 4) +
+          show_pvalue = TRUE, size_of_pvalue = 5,
+          hjust = 1, angle_x_text = 60, size_of_font = 8) +
     ggtitle(paste0(st, ": ", clean_name)) +
     theme(axis.title = element_text(size = 6),
           axis.text.y = element_text(size = 5),
