@@ -637,33 +637,39 @@ ggsave("04-figs/Fig02-barplot_epic.pdf", p2, width = 180, height = 250, units = 
 
 **Do NOT use `sig_heatmap()`** — it depends on `tidyHeatmap`, only outputs PDF (no PNG), and has `.x/.y` column suffix issues. Use `pheatmap` instead for dual PNG+PDF output with full control.
 
+**Heatmap dimension rules (MUST follow):**
+
+| Element | Position | Parameter |
+|---------|----------|-----------|
+| Variables (cell types) | **Rows** (y-axis) | `rownames(mat)` — shows readable names |
+| Samples | **Columns** (x-axis) | `colnames(mat)` — hidden (`show_colnames=FALSE`) |
+| Subtype color bar | **Top** (column annotation) | `annotation_col` |
+| Subtype gaps | **Column gaps** | `gaps_col` |
+| Clustering | **Rows only** (cell types) | `cluster_rows=TRUE`, `cluster_cols=FALSE` |
+
+The input data frame has samples as rows and variables as columns. **Must transpose** before pheatmap: `mat <- t(as.matrix(data[, cols]))`.
+
 ```r
-# Reusable helper for subtype heatmaps
-# Layout: cell types as ROWS, samples as COLUMNS, grouped by subtype
 plot_subtype_heatmap <- function(data, cols, subtype_col, title, prefix,
                                   width = 8, height = 6) {
   data <- data[order(data[[subtype_col]]), ]
-
-  # Transpose: cell types as rows, samples as columns
-  mat <- t(as.matrix(data[, cols]))
+  mat <- t(as.matrix(data[, cols]))  # TRANSPOSE: variables -> rows, samples -> columns
   mat[mat > 2] <- 2; mat[mat < -2] <- -2
-  rownames(mat) <- sub("\\.[xy]$", "", rownames(mat))  # clean .x/.y
+  rownames(mat) <- sub("\\.[xy]$", "", rownames(mat))
   colnames(mat) <- data$ID
 
-  # Column annotation for samples
   ann_col <- data.frame(Subtype = data[[subtype_col]], row.names = data$ID)
   subtypes <- sort(unique(data[[subtype_col]]))
   sub_colors <- c("#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B6")
   ann_colors <- list(Subtype = setNames(sub_colors[seq_along(subtypes)], subtypes))
-
-  # Gaps between subtype groups (columns now, not rows)
   gaps <- cumsum(table(data[[subtype_col]]))[-length(subtypes)]
 
   for (fmt in c("pdf", "png")) {
     pheatmap::pheatmap(mat, annotation_col = ann_col, annotation_colors = ann_colors,
       color = colorRampPalette(c("#2166AC", "white", "#B2182B"))(100),
       show_colnames = FALSE, cluster_rows = TRUE, cluster_cols = FALSE,
-      gaps_col = gaps, fontsize_row = 8, main = title,
+      treeheight_row = 15, gaps_col = gaps, fontsize_row = 8,
+      main = title,
       filename = paste0("04-figs/", prefix, ".", fmt), width = width, height = height, dpi = 300)
   }
 }
@@ -682,11 +688,13 @@ plot_subtype_heatmap(mcp_hm, mcp_sc, "TME_subtype",
 ```
 
 **pheatmap notes:**
-- **Do NOT re-scale** — data is already z-scored per column (variable) in Phase 4. Just cap at ±2.
-- **`cluster_rows = FALSE`** — samples are ordered by subtype, do NOT cluster rows (would destroy subtype ordering).
-- **`gaps_row`** — `cumsum(table(subtype))` gives the row indices where gaps should appear, visually separating subtypes.
-- **Clean `.x/.y` suffix** — `sub("\\.[xy]$", "", colnames)` removes merge artifacts for display.
-- **CRITICAL: Do NOT use `grep("CIBERSORT")` in merged data** — cibersort + cibersort_abs share cell names. Read column names from original cibersort CSV and match with `.x` suffix fallback.
+- **Do NOT re-scale** — data is already z-scored per variable in Phase 4. Just cap at ±2.
+- **`treeheight_row = 15`** — shrink clustering tree (default 50 is too tall).
+- **Must transpose** — input is samples×variables, pheatmap needs variables as rows for readable y-axis labels.
+- **`cluster_cols = FALSE`** — columns (samples) are ordered by subtype, clustering would destroy ordering.
+- **`gaps_col`** (not `gaps_row`) — since samples are columns, gaps go between column groups.
+- **`annotation_col`** (not `annotation_row`) — subtype annotation applies to samples (columns).
+- **CRITICAL: Do NOT use `grep("CIBERSORT")` in merged data** — cibersort + cibersort_abs share cell names. Read from original cibersort CSV instead.
 
 #### Fig 05: TME Correlation Matrix Heatmap
 
