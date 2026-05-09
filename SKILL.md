@@ -739,9 +739,9 @@ box_list <- lapply(seq_len(nrow(top10)), function(i) {
 p_combined <- wrap_plots(box_list, ncol = 5, nrow = 2)
 
 ggsave("04-figs/Fig06-top10_wilcoxon_boxplot.png", p_combined,
-       width = 250, height = 160, units = "mm", dpi = 300)
+       width = 250, height = 220, units = "mm", dpi = 300)
 ggsave("04-figs/Fig06-top10_wilcoxon_boxplot.pdf", p_combined,
-       width = 250, height = 160, units = "mm")
+       width = 250, height = 220, units = "mm")
 ```
 
 **sig_box native parameters for multi-panel layouts:**
