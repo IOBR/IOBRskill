@@ -170,8 +170,8 @@ GSE57303/
 │   ├── 04-statistical_analysis.R     # TME subtyping, correlation analysis
 │   └── 05-visualization.R            # All publication figures
 ├── 02-input/
-│   ├── annotated_eset.rds            # 21,355 genes × 70 samples (annotated)
-│   └── pdata.rds                     # Sample phenotype data
+│   ├── annotated_eset.csv            # 21,355 genes × 70 samples (annotated)
+│   └── pdata.csv                     # Sample phenotype data
 ├── 03-tme/
 │   ├── tme_cibersort.csv             # 22 immune cell fractions per sample
 │   ├── tme_mcpcounter.csv            # 8 cell population scores per sample
@@ -273,6 +273,4 @@ If you use IOBRskill in your research, please cite IOBR:
 - **Dongqiang Zeng** — [interlaken@smu.edu.cn](mailto:interlaken@smu.edu.cn)
 - **Issues**: [https://github.com/IOBR/IOBRskill/issues](https://github.com/IOBR/IOBRskill/issues)
 
-## License
 
-GPL-3
