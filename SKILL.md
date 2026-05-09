@@ -287,22 +287,43 @@ tme_clusters <- tme_cluster(input = tme_result, features = cell_types,
                              id = "sample_id", method = "kmeans")
 ```
 
-### Phase 4: Batch Statistical Analysis
+### Phase 4: Batch Statistical Analysis + Visualization
 
 **Script**: `04-statistical_analysis.R`
 
-IOBR provides powerful **batch** statistical functions — always prefer these over writing custom loops.
+IOBR provides powerful **batch** functions that combine statistical computation with built-in visualization — always prefer these over writing custom loops and ggplot code.
 
-#### 4.1 Batch Survival Analysis
+#### 4.1 Differential Expression Analysis + Volcano/Heatmap
 
-| Function | Purpose |
-|----------|---------|
-| `batch_surv()` | Batch Cox regression — hazard ratios and CIs for multiple variables |
-| `subgroup_survival()` | Subgroup Cox analysis — extract HR/CI from coxph by subgroups |
-| `sig_forest()` | Forest plot visualizing `batch_surv()` results |
+| Function | Purpose | Output |
+|----------|---------|--------|
+| `iobr_deg()` | DEG using DESeq2 or limma, with built-in volcano plot and heatmap | Statistics + figures |
+| `find_markers_in_bulk()` | Multi-group marker finding via Seurat (bootstrap/delong/venkatraman) | Statistics + figures |
 
 ```r
-# Batch survival: test all TME variables against OS
+# Differential expression with auto volcano + heatmap
+deg_res <- iobr_deg(eset = eset, pdata = pdata, group_id = "TME_subtype",
+                     array = TRUE, padj_cutoff = 0.05, logfc_cutoff = 1)
+
+# Multi-group markers
+markers <- find_markers_in_bulk(pdata = pdata, eset = eset, group = "TME_subtype")
+```
+
+#### 4.2 Batch Survival Analysis + KM/Forest/ROC
+
+| Function | Purpose | Output |
+|----------|---------|--------|
+| `batch_surv()` | Batch Cox regression — HR and CI for multiple variables | Statistics table |
+| `subgroup_survival()` | Subgroup Cox analysis by covariates | Statistics table |
+| `sig_surv_plot()` | KM curve for one signature/gene | Figure |
+| `batch_sig_surv_plot()` | Batch KM curves for multiple signatures across projects | Figures |
+| `surv_group()` | KM curve with risk table (High vs Low) | Figure |
+| `sig_forest()` | Forest plot for `batch_surv()` results | Figure |
+| `roc_time()` | Time-dependent ROC with AUC at multiple time points | Figure |
+| `sig_roc()` | Multiple ROC curves for binary response prediction | Figure |
+
+```r
+# Batch Cox regression
 surv_res <- batch_surv(pdata = pdata, tme_data = tme_result,
                         time = "OS_time", status = "OS_status")
 
@@ -310,133 +331,6 @@ surv_res <- batch_surv(pdata = pdata, tme_data = tme_result,
 sub_res <- subgroup_survival(pdata = pdata, variable = "T_cells_CD8_CIBERSORT",
                               group = "stage", time = "OS_time", status = "OS_status")
 
-# Forest plot
-sig_forest(surv_res, ...)
-```
-
-#### 4.2 Batch Correlation Analysis
-
-| Function | Purpose |
-|----------|---------|
-| `batch_cor()` | Batch Pearson/Spearman correlation between two sets of continuous variables |
-| `batch_pcc()` | Batch partial correlation controlling for a third variable |
-| `iobr_cor_plot()` | Visualize batch correlation results (signature vs signature/phenotype) |
-| `get_cor()` | Single pairwise correlation with scatter plot |
-| `get_cor_matrix()` | Correlation matrix heatmap between two variable sets |
-
-```r
-# Batch Spearman correlation: cell fractions vs signature scores
-cor_res <- batch_cor(data = merged_data,
-                      variable1 = cell_cols, variable2 = sig_cols,
-                      method = "spearman")
-
-# Partial correlation: control for tumor purity
-pcc_res <- batch_pcc(data = merged_data, target = sig_cols,
-                      variable = cell_cols, control = "TumorPurity_ESTIMATE")
-
-# Correlation heatmap visualization
-iobr_cor_plot(data = merged_data, signature = sig_group$immu_microenvironment,
-              target = cell_cols, method = "spearman")
-
-# Single correlation with scatter plot
-get_cor(data = merged_data, variable1 = "T_cells_CD8_CIBERSORT",
-        variable2 = "CD_8_T_effector", method = "spearman")
-
-# Correlation matrix
-get_cor_matrix(data = merged_data, variable1 = cell_cols, variable2 = sig_cols)
-```
-
-#### 4.3 Batch Differential Analysis
-
-| Function | Purpose |
-|----------|---------|
-| `batch_wilcoxon()` | Batch Wilcoxon rank-sum test — compare features between two groups |
-| `iobr_deg()` | Differential expression using DESeq2 or limma, with volcano/heatmap output |
-| `find_markers_in_bulk()` | Multi-group marker finding via Seurat methods |
-
-```r
-# Batch Wilcoxon: compare cell fractions between TME subtypes
-wilcox_res <- batch_wilcoxon(data = merged_data, feature = cell_cols,
-                              variable = "TME_subtype",
-                              group1 = "C1", group2 = "C2")
-
-# Differential expression (RNA-seq: DESeq2; Array: limma)
-deg_res <- iobr_deg(eset = eset, pdata = pdata, group = "TME_subtype",
-                     method = "limma", pvalue_cutoff = 0.05, log2fc_cutoff = 1)
-
-# Multi-group markers
-markers <- find_markers_in_bulk(pdata = pdata, eset = eset, group = "TME_subtype")
-```
-
-#### 4.4 GSEA and Pathway Analysis
-
-| Function | Purpose |
-|----------|---------|
-| `sig_gsea()` | Gene Set Enrichment Analysis via fgsea, with visualization |
-
-```r
-gsea_res <- sig_gsea(genesets = hallmark, gene_symbol = deg_res$gene,
-                      logfc = deg_res$log2FC, org = "hsa")
-```
-
-#### 4.5 Other Analyses
-
-| Function | Purpose |
-|----------|---------|
-| `LR_cal()` | Ligand-receptor interaction analysis |
-| `find_mutations()` | Mutation-TME interaction (TCGA only) |
-| `feature_manipulation()` | Clean features: remove NA, outliers, zero-variance |
-| `format_signatures()` | Prepare custom signature list for `calculate_sig_score()` |
-| `format_msigdb()` | Convert MSigDB GMT files to IOBR signature format |
-| `get_sig_sc()` | Extract top markers from single-cell DE for `calculate_sig_score()` |
-
-### Phase 5: Visualization
-
-**Script**: `05-visualization.R`
-
-Every figure MUST:
-1. Use IOBR's built-in visualization functions whenever available — do NOT write custom ggplot code for plots that IOBR already provides
-2. Choose palettes from IOBR's built-in options
-3. Export as **both** PNG (300dpi) + PDF
-
-#### 5.1 Complete IOBR Visualization Function Catalog
-
-##### TME Composition
-| Function | Purpose | Key Parameters |
-|----------|---------|---------------|
-| `cell_bar_plot()` | Stacked bar of cell fractions (CIBERSORT/EPIC/quanTIseq) | `input, id, features, pattern, coord_flip, palette` |
-| `percent_bar_plot()` | Stacked percentage bar plot | `input, x, y, color, palette, add_Freq` |
-
-##### Boxplots / Comparison
-| Function | Purpose | Key Parameters |
-|----------|---------|---------------|
-| `sig_box()` | Boxplot with statistical comparisons (Wilcoxon/t-test/Kruskal) | `data, signature, variable, method` |
-
-##### Heatmaps
-| Function | Purpose | Key Parameters |
-|----------|---------|---------------|
-| `sig_heatmap()` | Comprehensive heatmap with grouping, scaling, annotation | `input, group, palette, scale, cluster` |
-
-##### Correlation
-| Function | Purpose | Key Parameters |
-|----------|---------|---------------|
-| `get_cor()` | Scatter plot with regression line for single pair | `data, variable1, variable2, method` |
-| `get_cor_matrix()` | Correlation matrix heatmap between variable sets | `data, variable1, variable2, method` |
-| `iobr_cor_plot()` | Batch correlation visualization (signature vs signature/phenotype) | `data, signature, target, method` |
-
-##### Survival Analysis
-| Function | Purpose | Key Parameters |
-|----------|---------|---------------|
-| `sig_surv_plot()` | Single KM curve for one signature/gene | `input_pdata, signature, time, status, time_type, palette, mini_sig` |
-| `batch_sig_surv_plot()` | Batch KM curves for multiple signatures across projects | `input_pdata, signature, id, column_of_project, time, status, time_type, break_month, palette` |
-| `surv_group()` | KM curve comparing high/low groups with risk table | `input_pdata, target_group, ID, levels, time, status, time_type, palette, width, height` |
-| `sig_forest()` | Forest plot for `batch_surv()` results | `data, signature, pvalue, HR, CI_low_0.95, CI_up_0.95, n, color_option` |
-| `roc_time()` | Time-dependent ROC with AUC at multiple time points | `input, vars, time, status, time_point, time_type, palette` |
-| `sig_roc()` | Multiple ROC curves for binary response prediction | `data, response, variables, palette, compare, smooth` |
-
-**Survival visualization templates:**
-
-```r
 # Single KM plot
 sig_surv_plot(input_pdata = pdata, signature = "T_cells_CD8_CIBERSORT",
               time = "OS_time", status = "OS_status", time_type = "month",
@@ -455,8 +349,6 @@ surv_group(input_pdata = pdata, target_group = "TMEscoreA_CIR",
            save_path = "04-figs/surv_group.pdf")
 
 # Forest plot from batch_surv results
-surv_res <- batch_surv(pdata = pdata, tme_data = tme_result,
-                        time = "OS_time", status = "OS_status")
 sig_forest(data = surv_res, n = 20, color_option = 1, text.size = 13)
 
 # Time-dependent ROC
@@ -476,15 +368,165 @@ sig_roc(data = pdata, response = "response",
 - `mini_sig`: `"score"` (continuous, auto-split by median) or `"category"` (already grouped)
 - `sig_forest()` accepts output from `batch_surv()` directly — column names `P`, `HR`, `CI_low_0.95`, `CI_up_0.95` are expected
 
-##### Dimensionality Reduction
-| Function | Purpose | Key Parameters |
-|----------|---------|---------------|
-| `iobr_pca()` | PCA scatter plot | `eset, pdata, group, scale` |
+#### 4.3 Batch Correlation Analysis + Scatter/Heatmap
 
-##### DEG / Volcano
-| Function | Purpose | Key Parameters |
-|----------|---------|---------------|
-| `iobr_deg()` | DEG with built-in volcano plot and heatmap output | `eset, pdata, group, method, pvalue_cutoff, log2fc_cutoff` |
+| Function | Purpose | Output |
+|----------|---------|--------|
+| `batch_cor()` | Batch Pearson/Spearman correlation between two variable sets | Statistics table |
+| `batch_pcc()` | Batch partial correlation controlling for a third variable | Statistics table |
+| `get_cor()` | Single pairwise correlation with scatter plot + regression line | Figure |
+| `get_cor_matrix()` | Correlation matrix heatmap between two variable sets | Figure |
+| `iobr_cor_plot()` | Batch correlation visualization (signature vs signature/phenotype) | Figure |
+
+```r
+# Batch Spearman correlation: cell fractions vs signature scores
+cor_res <- batch_cor(data = merged_data,
+                      variable1 = cell_cols, variable2 = sig_cols,
+                      method = "spearman")
+
+# Partial correlation: control for tumor purity
+pcc_res <- batch_pcc(data = merged_data, target = sig_cols,
+                      variable = cell_cols, control = "TumorPurity_ESTIMATE")
+
+# Single correlation scatter plot with regression line
+get_cor(data = merged_data, variable1 = "T_cells_CD8_CIBERSORT",
+        variable2 = "CD_8_T_effector", method = "spearman")
+
+# Correlation matrix heatmap
+get_cor_matrix(data = merged_data, variable1 = cell_cols, variable2 = sig_cols)
+
+# Batch correlation visualization
+iobr_cor_plot(data = merged_data, signature = sig_group$immu_microenvironment,
+              target = cell_cols, method = "spearman")
+```
+
+#### 4.4 Batch Differential Testing + Boxplot
+
+| Function | Purpose | Output |
+|----------|---------|--------|
+| `batch_wilcoxon()` | Batch Wilcoxon rank-sum test — compare features between two groups | Statistics table |
+| `sig_box()` | Boxplot with statistical comparisons (Wilcoxon/t-test/Kruskal) | Figure |
+
+```r
+# Batch Wilcoxon: compare cell fractions between TME subtypes
+wilcox_res <- batch_wilcoxon(data = merged_data, feature = cell_cols,
+                              variable = "TME_subtype",
+                              group1 = "C1", group2 = "C2")
+
+# Boxplot with stats for key immune cells
+sig_box(data = merged_data, signature = "T_cells_CD8_CIBERSORT",
+        variable = "TME_subtype", method = "wilcox.test", palette_group = "jama")
+```
+
+#### 4.5 GSEA + Visualization
+
+| Function | Purpose | Output |
+|----------|---------|--------|
+| `sig_gsea()` | Gene Set Enrichment Analysis via fgsea, with built-in plots | Statistics + figures |
+
+```r
+gsea_res <- sig_gsea(genesets = hallmark, gene_symbol = deg_res$gene,
+                      logfc = deg_res$log2FC, org = "hsa")
+```
+
+#### 4.6 PCA Visualization
+
+| Function | Purpose | Output |
+|----------|---------|--------|
+| `iobr_pca()` | PCA dimensionality reduction with scatter plot | Figure |
+
+```r
+iobr_pca(pdata = pdata, eset = eset, group = "TME_subtype", scale = TRUE)
+```
+
+#### 4.7 Other Analyses
+
+| Function | Purpose |
+|----------|---------|
+| `LR_cal()` | Ligand-receptor interaction analysis |
+| `find_mutations()` | Mutation-TME interaction (TCGA only) |
+| `feature_manipulation()` | Clean features: remove NA, outliers, zero-variance |
+| `format_signatures()` | Prepare custom signature list for `calculate_sig_score()` |
+| `format_msigdb()` | Convert MSigDB GMT files to IOBR signature format |
+| `get_sig_sc()` | Extract top markers from single-cell DE for `calculate_sig_score()` |
+
+### Phase 5: TME Visualization
+
+**Script**: `05-visualization.R`
+
+Every figure MUST:
+1. Use IOBR's built-in visualization functions whenever available — do NOT write custom ggplot code for plots that IOBR already provides
+2. Choose palettes from IOBR's built-in options
+3. Export as **both** PNG (300dpi) + PDF
+
+> **Note**: Many IOBR functions combine statistical analysis with visualization (e.g., `iobr_deg()`, `sig_surv_plot()`, `get_cor()`, `sig_box()`, `sig_gsea()`, `iobr_pca()`). These are documented in Phase 4 with full code templates. Phase 5 focuses on TME-specific composition plots and formatting rules.
+
+#### 5.1 TME Composition Visualization
+
+##### cell_bar_plot() — Cell Fraction Stacked Bar Plot
+
+MUST use IOBR's built-in `cell_bar_plot()` for TME composition bar plots. Do NOT write custom ggplot code.
+
+**Critical rules:**
+
+1. **Filter QC columns before plotting** — CIBERSORT output includes `P.value_CIBERSORT`, `Correlation_CIBERSORT`, `RMSE_CIBERSORT`. These are statistical metrics, NOT cell types. Use `features` parameter to specify only cell columns:
+```r
+qc_cols <- grep("^[Pp][.]", colnames(tme_cb), value = TRUE)
+qc_cols <- c(qc_cols, grep("^Correlation", colnames(tme_cb), value = TRUE),
+                  grep("^RMSE", colnames(tme_cb), value = TRUE))
+cell_cols <- setdiff(grep("_CIBERSORT$", colnames(tme_cb), value = TRUE), qc_cols)
+```
+
+2. **Legend formatting** — Legend MUST be compact, positioned on the right side, with:
+   - `legend.text = element_text(size = 5)`
+   - `legend.key.size = unit(2.5, "mm")`
+   - `legend.title = element_blank()`
+   - `guides(fill = guide_legend(ncol = 1))`
+
+3. **Sample labels** — If sample count > 50, hide sample IDs:
+```r
+if (n_samples > 50) {
+  p1 <- p1 + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
+}
+```
+
+4. **Figure dimensions** — `width = 180mm, height = 250mm` for `coord_flip = TRUE`
+
+**Complete template:**
+```r
+tme_cb <- read.csv("03-tme/tme_cibersort.csv")
+qc_cols <- grep("^[Pp][.]", colnames(tme_cb), value = TRUE)
+qc_cols <- c(qc_cols, grep("^Correlation", colnames(tme_cb), value = TRUE),
+                  grep("^RMSE", colnames(tme_cb), value = TRUE))
+cell_cols <- setdiff(grep("_CIBERSORT$", colnames(tme_cb), value = TRUE), qc_cols)
+
+p <- cell_bar_plot(input = tme_cb, id = "ID",
+                    features = cell_cols,
+                    title = "CIBERSORT TME Composition",
+                    coord_flip = TRUE, palette = 4,
+                    legend.position = "right")
+p <- p + guides(fill = guide_legend(ncol = 1)) +
+     theme(legend.text = element_text(size = 5),
+           legend.key.size = unit(2.5, "mm"),
+           legend.title = element_blank(),
+           plot.title = element_text(size = 10, hjust = 0.5))
+
+if (nrow(tme_cb) > 50) {
+  p <- p + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
+}
+
+ggsave("04-figs/01-barplot_cibersort.png", p, width = 180, height = 250, units = "mm", dpi = 300)
+ggsave("04-figs/01-barplot_cibersort.pdf", p, width = 180, height = 250, units = "mm")
+```
+
+##### sig_heatmap() — TME Landscape Heatmap
+
+```r
+sig_heatmap(input = tme_result, group = subtype$TME_subtype,
+            scale = TRUE, palette = 2, palette_group = "jama")
+```
+
+#### 5.2 IOBR Palettes
 
 #### 5.2 IOBR Palettes
 
