@@ -132,6 +132,46 @@ Cached location: `~/.cache/iobr_data/` or temp directory.
 
 ---
 
+## 4b. On-demand Pathway Data via `load_data()`
+
+IOBR provides `IOBR::load_data()` to download and cache pathway gene sets from GitHub on first use. These are essential for comprehensive pathway scoring and GSEA.
+
+```r
+hallmark  <- IOBR::load_data("hallmark")   # 50 pathways
+go_bp     <- IOBR::load_data("go_bp")      # 7,658 gene sets
+go_cc     <- IOBR::load_data("go_cc")      # Cellular component
+go_mf     <- IOBR::load_data("go_mf")      # Molecular function
+kegg      <- IOBR::load_data("kegg")       # 186 pathways
+reactome  <- IOBR::load_data("reactome")   # 1,615 pathways
+```
+
+| Dataset | Gene Sets | Description |
+|---------|-----------|-------------|
+| `"hallmark"` | 50 | MSigDB Hallmark gene sets — well-curated biological pathways |
+| `"go_bp"` | 7,658 | Gene Ontology Biological Process |
+| `"go_cc"` | ~1,000 | Gene Ontology Cellular Component |
+| `"go_mf"` | ~1,700 | Gene Ontology Molecular Function |
+| `"kegg"` | 186 | KEGG pathway gene sets |
+| `"reactome"` | 1,615 | Reactome pathway gene sets |
+
+**Usage pattern with `calculate_sig_score()`:**
+```r
+hallmark <- IOBR::load_data("hallmark")
+kegg     <- IOBR::load_data("kegg")
+
+sig_res <- calculate_sig_score(
+  pdata = NULL, eset = eset,
+  signature = c(hallmark, kegg),
+  method = "ssgsea",
+  mini_gene_count = 3,
+  adjust_eset = TRUE
+)
+```
+
+**Note**: First call to `load_data()` for each dataset requires internet access to download from GitHub. Subsequent calls use the cached version.
+
+---
+
 ## 5. Quick Reference: How to Access Signatures
 
 ```r

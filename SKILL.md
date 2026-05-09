@@ -62,7 +62,21 @@ IOBR ships with rich built-in data — you rarely need external annotation files
 | TME signatures (186) | `IOBR:::signature_tme` | Immune, stromal, EMT, checkpoint signatures |
 | Full collection (323) | `data("signature_collection")` | All signatures + Hallmark + Metabolism |
 | Signature groupings | `data("sig_group")` | 35+ categories for filtering signatures |
+| **Pathway data (on-demand)** | `IOBR::load_data()` | hallmark (50), go_bp (7658), kegg (186), reactome (1615) |
 | Example datasets | `data("pdata_stad")` etc. | TCGA-STAD, IMvigor210 toy data |
+
+### On-demand pathway data via `load_data()`
+
+IOBR provides `IOBR::load_data()` to download and cache pathway gene sets from GitHub on first use. These are essential for comprehensive pathway scoring:
+
+```r
+hallmark  <- IOBR::load_data("hallmark")   # 50 pathways
+go_bp     <- IOBR::load_data("go_bp")      # 7,658 gene sets
+go_cc     <- IOBR::load_data("go_cc")
+go_mf     <- IOBR::load_data("go_mf")
+kegg      <- IOBR::load_data("kegg")       # 186 pathways
+reactome  <- IOBR::load_data("reactome")   # 1,615 pathways
+```
 
 ---
 
@@ -111,6 +125,7 @@ Rscript 01-script/01-data_preprocessing.R > 06-log/01-data_preprocessing.log 2>&
 | Function | Purpose | When to Use |
 |----------|---------|-------------|
 | `count2tpm()` | Count → TPM + gene ID mapping | Raw RNA-seq counts |
+| `log2eset()` | Auto-detect and apply log2 transform | Ensures log2 scale for downstream analysis |
 | `anno_eset()` | Probe → gene symbol annotation | Microarray data or unannotated matrices |
 | `remove_batcheffect()` | ComBat / ComBat-seq batch correction | Multi-batch datasets |
 | `find_outlier_samples()` | WGCNA-based outlier detection | QC step |
@@ -124,6 +139,9 @@ eset <- count2tpm(countMat = expr_matrix, idType = "Ensembl", org = "hsa")
 # Microarray: probe annotation
 eset <- anno_eset(eset = expr_matrix, annotation = anno_df,
                   symbol = "gene_symbol", probe = "probe_id", method = "mean")
+
+# Ensure log2 scale (auto-detects — only transforms if not already log2)
+eset <- log2eset(eset)
 ```
 
 Save output:
@@ -149,20 +167,50 @@ saveRDS(pdata, file = "02-input/pdata.rds")
 | `"quantiseq"` | 10 incl. M1/M2 | Macrophage polarization |
 | `"ips"` | 4 axes | Immunotherapy response |
 
-Recommended: CIBERSORT + MCPcounter + ESTIMATE (most cited).
+Recommended: CIBERSORT + MCPcounter + ESTIMATE (most cited). For comprehensive analysis, run all 8 methods and merge.
 
+#### Single-method usage:
 ```r
 tme_result <- deconvo_tme(eset = eset, method = "cibersort", arrays = FALSE, perm = 1000)
 write.csv(tme_result, file = "03-tme/tme_cibersort.csv")
 ```
 
-#### Critical caveats (from live testing):
+#### Full 8-method deconvolution + merge (production workflow):
+```r
+# Each method may take 1-5 minutes depending on sample size
+cibersort <- deconvo_tme(eset = eset, method = "cibersort",   arrays = FALSE, perm = 1000)
+epic      <- deconvo_tme(eset = eset, method = "epic",         arrays = FALSE)
+mcp       <- deconvo_tme(eset = eset, method = "mcpcounter")
+xcell     <- deconvo_tme(eset = eset, method = "xcell",        arrays = FALSE)
+estimate  <- deconvo_tme(eset = eset, method = "estimate")
+timer     <- deconvo_tme(eset = eset, method = "timer",
+                          group_list = rep(tumor_type, ncol(eset)))
+quantiseq <- deconvo_tme(eset = eset, method = "quantiseq",
+                          tumor = TRUE, arrays = FALSE, scale_mrna = TRUE)
+ips       <- deconvo_tme(eset = eset, method = "ips", plot = FALSE)
+
+# Merge all results by sample ID
+tme_combine <- cibersort %>%
+  inner_join(., mcp,       by = "ID") %>%
+  inner_join(., xcell,     by = "ID") %>%
+  inner_join(., epic,      by = "ID") %>%
+  inner_join(., estimate,  by = "ID") %>%
+  inner_join(., quantiseq, by = "ID") %>%
+  inner_join(., timer,     by = "ID") %>%
+  inner_join(., ips,       by = "ID")
+
+save(tme_combine, file = "03-tme/tme_combine.RData")
+```
+
+#### Critical caveats:
 
 1. **CIBERSORT needs linear-scale data** — Anti-log first: `eset_linear <- 2^eset` if log2-transformed.
 2. **Column names have method suffix** — `T_cells_CD8_CIBERSORT`, `T_cells_MCPcounter`, etc.
 3. **Output CSV has `ID` column** — Set rownames: `rownames(df) <- df$ID; df$ID <- NULL`.
 4. **`arrays = TRUE`** for microarray; `perm = 1000` recommended for CIBERSORT.
 5. **`preprocessCore` required** — Install: `BiocManager::install("preprocessCore")`.
+6. **TIMER requires `group_list`** — Provide cancer type per sample: `rep(tumor_type, ncol(eset))`.
+7. **quanTIseq parameters** — Use `tumor = TRUE, arrays = FALSE, scale_mrna = TRUE` for tumor samples.
 
 ### Phase 3: Signature Scoring and Pathway Analysis
 
@@ -177,22 +225,58 @@ write.csv(tme_result, file = "03-tme/tme_cibersort.csv")
 | `"zscore"` | Simple, fast |
 | `"integration"` | Combined approach |
 
+#### Step 3a: TME / IO biomarker signature scoring:
 ```r
-signature_tme <- IOBR:::signature_tme    # 186 TME signatures (internal, use :::)
-sig_score <- IOBR:::calculate_sig_score_ssgsea(eset = eset,
-                                                signature = signature_tme,
-                                                mini_gene_count = 3,
-                                                adjust_eset = FALSE)
-write.csv(sig_score, file = "03-tme/sig_score_tme.csv")
+# Option A: TME signatures (186 sets, internal — use :::)
+signature_tme <- IOBR:::signature_tme
+sig_tme <- calculate_sig_score(pdata = NULL, eset = eset,
+                                signature = signature_tme,
+                                method = "ssgsea",
+                                mini_gene_count = 3,
+                                adjust_eset = TRUE)
+write.csv(sig_tme, file = "03-tme/sig_score_tme.csv")
+
+# Option B: Full collection (323 sets) — for comprehensive analysis
+data("signature_collection")
+sig_res <- calculate_sig_score(pdata = NULL, eset = eset,
+                                signature = signature_collection,
+                                method = "PCA",
+                                mini_gene_count = 2,
+                                adjust_eset = TRUE)
+save(sig_res, file = "03-tme/sig_score_collection.RData")
 ```
 
-#### Critical caveats:
+#### Step 3b: Pathway scoring (Hallmark + GO + KEGG + Reactome):
+```r
+hallmark  <- IOBR::load_data("hallmark")    # 50 pathways
+go_bp     <- IOBR::load_data("go_bp")       # 7,658 gene sets
+go_cc     <- IOBR::load_data("go_cc")
+go_mf     <- IOBR::load_data("go_mf")
+kegg      <- IOBR::load_data("kegg")        # 186 pathways
+reactome  <- IOBR::load_data("reactome")    # 1,615 pathways
 
-1. **`signature_tme` is internal** — Access via `IOBR:::signature_tme` (triple colon).
-2. **`signature_collection` needs `data()`** — `data("signature_collection")` before use.
-3. **`calculate_sig_score()` has `needs_log` bug** — Use `IOBR:::calculate_sig_score_ssgsea(..., adjust_eset=FALSE)` directly.
-4. **No built-in hallmark** — But `sig_group$hallmark` lists 50 Hallmark names available in `signature_collection`.
-5. **`adjust_eset = FALSE`** for already log-transformed data.
+sig_pathway <- calculate_sig_score(pdata = NULL, eset = eset,
+                                    signature = c(hallmark, go_bp, go_cc, go_mf, kegg, reactome),
+                                    method = "ssgsea",
+                                    mini_gene_count = 3)
+save(sig_pathway, file = "03-tme/sig_score_pathway.RData")
+```
+
+#### Step 3c: Merge all results into master table:
+```r
+tme_sig_combine <- tme_combine %>%
+  inner_join(., sig_res,     by = "ID") %>%
+  inner_join(., sig_pathway, by = "ID")
+save(tme_sig_combine, file = "03-tme/tme_sig_combine.RData")
+```
+
+#### Key notes:
+
+1. **`pdata = NULL, adjust_eset = TRUE`** — This is the correct production pattern for `calculate_sig_score()`. Do NOT set `adjust_eset = FALSE` unless data is already properly scaled.
+2. **`signature_tme` is internal** — Access via `IOBR:::signature_tme` (triple colon).
+3. **`signature_collection` needs `data()`** — Call `data("signature_collection")` before use.
+4. **`IOBR::load_data()` downloads on first use** — Caches locally for subsequent calls.
+5. **Pathway scoring is computationally heavy** — Consider running Hallmark (50) and KEGG (186) first for quick results, then GO/Reactome for comprehensive analysis.
 
 Use `references/iobr_built_in_data.md` for the full signature catalog and `data("sig_group")` for filtering by category.
 
@@ -367,5 +451,6 @@ Include a brief summary of key findings below the tree.
 - `references/functions.md` — IOBR function parameter reference
 - `references/palettes.md` — Color palette selection guide
 - `references/iobr_built_in_data.md` — Complete catalog of built-in signatures, annotations, and datasets
+- `references/iobr_pipeline_template.R` — Full production pipeline template (8-method deconvolution + signature + pathway scoring)
 
-Read these when you need specific parameter details, palette options, or want to know what signatures are available.
+Read these when you need specific parameter details, palette options, want to know what signatures are available, or need a complete pipeline template to adapt.
