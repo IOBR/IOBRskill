@@ -163,6 +163,15 @@ batch_wilcoxon(data, target = "group", feature = NULL, feature_manipulation = FA
 - `feature`: Character vector of feature column names to test. If NULL, interactive selection.
 - Returns tibble: `sig_names`, `p.value`, `statistic`, `p.adj`, `log10pvalue`, `stars`
 
+### `batch_kruskal()`
+Batch Kruskal-Wallis test — compare feature distributions across multiple groups (≥3 levels).
+```r
+batch_kruskal(data, target = "group", feature = NULL, feature_manipulation = FALSE)
+```
+- `target`: Column name (string) of the grouping variable. Must have ≥3 levels.
+- `feature`: Character vector of feature column names to test. If NULL, interactive selection.
+- Returns tibble: `sig_names`, `p.value`, `statistic`, `p.adj`, `log10pvalue`, `stars`
+
 ### `iobr_deg()`
 Differential expression analysis (limma or DESeq2), with built-in volcano and heatmap.
 ```r

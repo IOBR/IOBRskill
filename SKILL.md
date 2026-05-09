@@ -107,6 +107,7 @@ Create this structure before starting analysis:
 project/
 ├── 01-script/         # R scripts (numbered, each with IOBR citation header)
 ├── 02-input/          # Normalized and annotated expression matrices
+│   └── pdata_summary.csv          # Phenotype variable summary
 ├── 03-tme/            # TME deconvolution and signature scoring results
 ├── 04-figs/
 │   ├── *.png/pdf      # All figures (PNG 300dpi + PDF, numbered naming)
@@ -114,7 +115,6 @@ project/
 │   └── data/          # Statistical result tables matching figures
 ├── 05-note/
 │   ├── IOBR-pipeline.md           # Analysis plan (generated in Phase 0)
-│   ├── pdata_summary.csv          # Phenotype variable summary
 │   └── IOBR-analysis-README.md    # Final analysis summary
 └── 06-log/            # R execution logs (one per script, with citation header)
 ```
@@ -240,8 +240,8 @@ for (col in colnames(pdata)) {
   ))
 }
 
-write.csv(pdata_summary, file = "05-note/pdata_summary.csv", row.names = FALSE)
-cat(">>>>> pdata summary saved to 05-note/pdata_summary.csv\n")
+write.csv(pdata_summary, file = "02-input/pdata_summary.csv", row.names = FALSE)
+cat(">>>>> pdata summary saved to 02-input/pdata_summary.csv\n")
 ```
 
 This summary helps decide which statistical tests to apply in Phase 4.
@@ -490,7 +490,7 @@ Run statistical tests based on what's available in pdata:
 ```r
 # --- Wilcoxon test (IF categorical variables exist in pdata) ---
 # Check pdata_summary.csv for factor/binary variables
-pdata_summary <- read.csv("05-note/pdata_summary.csv")
+pdata_summary <- read.csv("02-input/pdata_summary.csv")
 cat_vars <- pdata_summary$var[pdata_summary$type %in% c("factor", "binary")]
 
 if (length(cat_vars) > 0) {
@@ -588,13 +588,25 @@ Every figure MUST:
 
 **IMPORTANT**: Add `pdf(NULL)` at the top of the visualization script to suppress stray `Rplots.pdf` from IOBR internal plot calls. Also clean up at the end: `if (file.exists("Rplots.pdf")) file.remove("Rplots.pdf")`.
 
-#### Fig 01–02: TME Composition Barplots (CIBERSORT + EPIC)
+#### sig_box Standard Parameters (MUST use for ALL boxplots)
 
-**IMPORTANT**: Only methods that produce cell FRACTION data (CIBERSORT, EPIC) should use `cell_bar_plot()`. ESTIMATE scores (stromal_score, immune_score, etc.) are NOT fractions and should NOT be plotted as barplots.
+Every `sig_box()` call in this pipeline MUST use these fixed parameters:
+
+```r
+sig_box(data = data, signature = feature_col, variable = group_col,
+        palette = "paired1", show_pairwise_p = TRUE,
+        angle_x_text = 60, hjust = 1,
+        size_of_pvalue = 3, size_of_font = 5)
+```
+
+For multi-panel layouts, combine individual `sig_box()` plots with `patchwork::wrap_plots()`.
+
+#### Fig 01: CIBERSORT Barplot (22 cell types)
+
+**IMPORTANT**: Only methods that produce cell FRACTION data (CIBERSORT, EPIC) should use `cell_bar_plot()`. ESTIMATE scores are NOT fractions.
 
 ```r
 tme_cb <- read.csv("03-tme/tme_cibersort.csv")
-tme_ep <- read.csv("03-tme/tme_epic.csv")
 
 # Filter QC columns
 qc_cols <- grep("^[Pp][.]", colnames(tme_cb), value = TRUE)
@@ -602,7 +614,6 @@ qc_cols <- c(qc_cols, grep("^Correlation", colnames(tme_cb), value = TRUE),
                   grep("^RMSE", colnames(tme_cb), value = TRUE))
 cell_cols_cb <- setdiff(grep("_CIBERSORT$", colnames(tme_cb), value = TRUE), qc_cols)
 
-# CIBERSORT barplot
 p1 <- cell_bar_plot(input = tme_cb, id = "ID", features = cell_cols_cb,
                      title = "CIBERSORT TME Composition",
                      coord_flip = TRUE, palette = 4, legend.position = "right")
@@ -617,9 +628,14 @@ if (nrow(tme_cb) > 50) {
 
 ggsave("04-figs/Fig01-barplot_cibersort.png", p1, width = 180, height = 250, units = "mm", dpi = 300)
 ggsave("04-figs/Fig01-barplot_cibersort.pdf", p1, width = 180, height = 250, units = "mm")
+```
 
-# Repeat for EPIC with EPIC-specific QC filtering
+#### Fig 02: EPIC Barplot (8 cell types)
+
+```r
+tme_ep <- read.csv("03-tme/tme_epic.csv")
 epic_cols <- grep("_EPIC$", colnames(tme_ep), value = TRUE)
+
 p2 <- cell_bar_plot(input = tme_ep, id = "ID", features = epic_cols,
                      title = "EPIC TME Composition",
                      coord_flip = TRUE, palette = 4, legend.position = "right")
@@ -633,27 +649,144 @@ ggsave("04-figs/Fig02-barplot_epic.png", p2, width = 180, height = 250, units = 
 ggsave("04-figs/Fig02-barplot_epic.pdf", p2, width = 180, height = 250, units = "mm")
 ```
 
-#### Fig 03–04: TME Heatmaps by Subtype (pheatmap)
+#### Fig 03a-c: TME Heatmaps WITHOUT Subtype (z-score)
 
-**Do NOT use `sig_heatmap()`** — it depends on `tidyHeatmap`, only outputs PDF (no PNG), and has `.x/.y` column suffix issues. Use `pheatmap` instead for dual PNG+PDF output with full control.
+Cluster both rows and columns, no subtype annotation. Use `pheatmap`.
+
+```r
+plot_heatmap_no_subtype <- function(data, cols, title, prefix,
+                                     width = 8, height = 6) {
+  mat <- t(as.matrix(data[, cols]))  # variables as rows, samples as columns
+  mat[mat > 2] <- 2; mat[mat < -2] <- -2
+  rownames(mat) <- sub("\\.[xy]$", "", rownames(mat))
+  colnames(mat) <- data$ID
+
+  for (fmt in c("pdf", "png")) {
+    pheatmap::pheatmap(mat,
+      color = colorRampPalette(c("#2166AC", "white", "#B2182B"))(100),
+      show_colnames = FALSE, cluster_rows = TRUE, cluster_cols = TRUE,
+      treeheight_row = 15, treeheight_col = 15, fontsize_row = 8,
+      main = title,
+      filename = paste0("04-figs/", prefix, ".", fmt),
+      width = width, height = height, dpi = 300)
+  }
+}
+
+# Fig03a: CIBERSORT
+plot_heatmap_no_subtype(tme_scaled, cb_sc, "CIBERSORT TME Landscape",
+                        "Fig03a-heatmap_cibersort")
+
+# Fig03b: MCPcounter
+mcp_sc <- grep("MCPcounter$", colnames(tme_scaled), value = TRUE)
+plot_heatmap_no_subtype(tme_scaled, mcp_sc, "MCPcounter TME Landscape",
+                        "Fig03b-heatmap_mcpcounter", width = 6, height = 5)
+
+# Fig03c: xCell
+xc_sc <- grep("xCell$", colnames(tme_scaled), value = TRUE)
+plot_heatmap_no_subtype(tme_scaled, xc_sc, "xCell TME Landscape",
+                        "Fig03c-heatmap_xcell", width = 10, height = 8)
+```
+
+#### Fig 04a-d: Survival Forest Plots (IF survival data exists)
+
+**USE `sig_forest()`** — IOBR's built-in forest plot function. **MUST filter extreme HR before plotting**: remove variables with `abs(HR) > 10` to prevent `sig_forest()` from producing blank plots (its `coord_trans(x = "log2")` only has 3 fixed breaks that break with extreme HR ranges).
+
+```r
+if (length(time_cols) > 0 && length(status_cols) > 0) {
+  time_col   <- time_cols[1]
+  status_col <- status_cols[1]
+
+  # Fig04a: CIBERSORT survival forest
+  cb_surv <- batch_surv(pdata = tme_pdata, variable = cb_sc,
+                        time = time_col, status = status_col)
+  write.csv(cb_surv, file = "04-figs/data/05-surv_cibersort.csv", row.names = FALSE)
+  cb_surv_filt <- cb_surv[abs(as.numeric(cb_surv$HR)) <= 10, ]
+  if (nrow(cb_surv_filt) > 0) {
+    p04a <- sig_forest(cb_surv_filt, signature = "ID", n = 20)
+    ggsave("04-figs/Fig04a-forest_cibersort.png", p04a, width = 10, height = 6, units = "in", dpi = 300)
+    ggsave("04-figs/Fig04a-forest_cibersort.pdf", p04a, width = 10, height = 6)
+  }
+
+  # Fig04b: MCPcounter + EPIC + xCell survival forest
+  other_cols <- c(mcp_sc, epic_sc, xc_sc)
+  other_surv <- batch_surv(pdata = tme_pdata, variable = other_cols,
+                           time = time_col, status = status_col)
+  write.csv(other_surv, file = "04-figs/data/05-surv_other_tme.csv", row.names = FALSE)
+  other_surv_filt <- other_surv[abs(as.numeric(other_surv$HR)) <= 10, ]
+  if (nrow(other_surv_filt) > 0) {
+    p04b <- sig_forest(other_surv_filt, signature = "ID", n = 20)
+    ggsave("04-figs/Fig04b-forest_other_tme.png", p04b, width = 10, height = 6, units = "in", dpi = 300)
+    ggsave("04-figs/Fig04b-forest_other_tme.pdf", p04b, width = 10, height = 6)
+  }
+
+  # Fig04c: TME signatures survival forest
+  tme_sig_surv <- batch_surv(pdata = tme_pdata, variable = tme_sig_cols,
+                             time = time_col, status = status_col)
+  write.csv(tme_sig_surv, file = "04-figs/data/05-surv_tme_signatures.csv", row.names = FALSE)
+  tme_sig_surv_filt <- tme_sig_surv[abs(as.numeric(tme_sig_surv$HR)) <= 10, ]
+  if (nrow(tme_sig_surv_filt) > 0) {
+    p04c <- sig_forest(tme_sig_surv_filt, signature = "ID", n = 20)
+    ggsave("04-figs/Fig04c-forest_tme_signature.png", p04c, width = 10, height = 6, units = "in", dpi = 300)
+    ggsave("04-figs/Fig04c-forest_tme_signature.pdf", p04c, width = 10, height = 6)
+  }
+
+  # Fig04d: GO/KEGG/Hallmark survival forest
+  pathway_surv <- batch_surv(pdata = tme_pdata, variable = pathway_cols,
+                             time = time_col, status = status_col)
+  write.csv(pathway_surv, file = "04-figs/data/05-surv_pathways.csv", row.names = FALSE)
+  pathway_surv_filt <- pathway_surv[abs(as.numeric(pathway_surv$HR)) <= 10, ]
+  if (nrow(pathway_surv_filt) > 0) {
+    p04d <- sig_forest(pathway_surv_filt, signature = "ID", n = 20)
+    ggsave("04-figs/Fig04d-forest_go_kegg.png", p04d, width = 10, height = 6, units = "in", dpi = 300)
+    ggsave("04-figs/Fig04d-forest_go_kegg.pdf", p04d, width = 10, height = 6)
+  }
+}
+```
+
+**Key notes:**
+- **MUST filter `abs(HR) > 10` before `sig_forest()`** — extreme HR values (e.g., 0.001–190) cause `sig_forest()` to produce blank plots because its internal `coord_trans(x = "log2")` only has 3 fixed axis breaks.
+- **Save full (unfiltered) survival results** to `04-figs/data/` — filtering is only for visualization.
+- **Split into 4 groups**: CIBERSORT, MCPcounter+EPIC+xCell, TME Signatures, GO/KEGG/Hallmark.
+
+#### Fig 05: TME Cell Correlation Matrix Heatmap
+
+Input: CIBERSORT + MCPcounter + ESTIMATE variables. Use `pheatmap` on Spearman correlation matrix.
+
+```r
+load("04-figs/data/06-cor_matrix_full.RData")
+
+# Deduplicate: keep .x (cibersort), drop .y (cibersort_abs)
+keep <- !grepl("\\.[xy]$", rownames(cor_mat)) | grepl("\\.x$", rownames(cor_mat))
+cor_mat <- cor_mat[keep, keep]
+rownames(cor_mat) <- sub("\\.x$", "", rownames(cor_mat))
+colnames(cor_mat) <- sub("\\.x$", "", colnames(cor_mat))
+
+for (fmt in c("pdf", "png")) {
+  pheatmap::pheatmap(cor_mat, fontsize = 6, fontsize_row = 5, fontsize_col = 5,
+                      color = colorRampPalette(c("#2166AC", "white", "#B2182B"))(100),
+                      border_color = NA, main = "TME Cell Correlation Matrix",
+                      filename = paste0("04-figs/Fig05-cor_matrix.", fmt),
+                      width = 8, height = 7, dpi = 300)
+}
+```
+
+#### Fig 06a-d: TME Heatmaps BY Subtype + KM Plot
 
 **Heatmap dimension rules (MUST follow):**
 
 | Element | Position | Parameter |
 |---------|----------|-----------|
 | Variables (cell types) | **Rows** (y-axis) | `rownames(mat)` — shows readable names |
-| Samples | **Columns** (x-axis) | `colnames(mat)` — hidden (`show_colnames=FALSE`) |
+| Samples | **Columns** (x-axis) | `show_colnames=FALSE` |
 | Subtype color bar | **Top** (column annotation) | `annotation_col` |
 | Subtype gaps | **Column gaps** | `gaps_col` |
-| Clustering | **Rows only** (cell types) | `cluster_rows=TRUE`, `cluster_cols=FALSE` |
-
-The input data frame has samples as rows and variables as columns. **Must transpose** before pheatmap: `mat <- t(as.matrix(data[, cols]))`.
+| Clustering | **Rows only** | `cluster_rows=TRUE, cluster_cols=FALSE` |
 
 ```r
 plot_subtype_heatmap <- function(data, cols, subtype_col, title, prefix,
                                   width = 8, height = 6) {
   data <- data[order(data[[subtype_col]]), ]
-  mat <- t(as.matrix(data[, cols]))  # TRANSPOSE: variables -> rows, samples -> columns
+  mat <- t(as.matrix(data[, cols]))  # variables -> rows, samples -> columns
   mat[mat > 2] <- 2; mat[mat < -2] <- -2
   rownames(mat) <- sub("\\.[xy]$", "", rownames(mat))
   colnames(mat) <- data$ID
@@ -674,222 +807,64 @@ plot_subtype_heatmap <- function(data, cols, subtype_col, title, prefix,
   }
 }
 
-# Fig 03: CIBERSORT — use only cibersort (not cibersort_abs) columns
-hm_data <- tme_scaled[, c("ID", cb_sc, "TME_subtype")]
-plot_subtype_heatmap(hm_data, cb_sc, "TME_subtype",
-  "CIBERSORT TME by Subtype", "Fig03-heatmap_cibersort_subtype")
+# Fig06a: CIBERSORT by subtype
+hm_data_cb <- tme_scaled[, c("ID", cb_sc, "TME_subtype")]
+plot_subtype_heatmap(hm_data_cb, cb_sc, "TME_subtype",
+  "CIBERSORT TME by Subtype", "Fig06a-heatmap_cibersort_subtype")
 
-# Fig 04: MCPcounter — MUST use scaled data, not raw CSV
-mcp_sc <- grep("MCPcounter$", colnames(tme_scaled), value = TRUE)
-mcp_sc <- setdiff(mcp_sc, "TME_subtype")
-mcp_hm <- tme_scaled[, c("ID", mcp_sc, "TME_subtype")]
-plot_subtype_heatmap(mcp_hm, mcp_sc, "TME_subtype",
-  "MCPcounter TME by Subtype", "Fig04-heatmap_mcpcounter_subtype", width = 6, height = 5)
+# Fig06b: MCPcounter by subtype
+hm_data_mcp <- tme_scaled[, c("ID", mcp_sc, "TME_subtype")]
+plot_subtype_heatmap(hm_data_mcp, mcp_sc, "TME_subtype",
+  "MCPcounter TME by Subtype", "Fig06b-heatmap_mcpcounter_subtype", width = 6, height = 5)
+
+# Fig06c: xCell by subtype
+xc_sc_sub <- intersect(xc_sc, colnames(tme_scaled))
+hm_data_xc <- tme_scaled[, c("ID", xc_sc_sub, "TME_subtype")]
+plot_subtype_heatmap(hm_data_xc, xc_sc_sub, "TME_subtype",
+  "xCell TME by Subtype", "Fig06c-heatmap_xcell_subtype", width = 10, height = 8)
+
+# Fig06d: KM plot by subtype (IF survival data exists)
+# sig_surv_plot does NOT work with arbitrary categorical variables.
+# Use survminer directly for KM by TME subtype.
+if (length(time_cols) > 0 && length(status_cols) > 0) {
+  library(survival)
+  library(survminer)
+  surv_data <- read.csv("04-figs/data/01-tme_pdata_merged.csv")
+  dir.create("04-figs/kmplot", showWarnings = FALSE, recursive = TRUE)
+
+  surv_obj <- Surv(time = surv_data[[time_col]], event = surv_data[[status_col]])
+  km_fit <- survfit(surv_obj ~ TME_subtype, data = surv_data)
+  p_km <- ggsurvplot(km_fit, data = surv_data,
+    pval = TRUE, conf.int = FALSE,
+    palette = c("#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B6"),
+    legend.title = "TME Subtype", legend.labs = sort(unique(surv_data$TME_subtype)),
+    xlab = "Time (months)", ylab = "Overall Survival",
+    risk.table = TRUE, fontsize = 3, surv.median.line = "hv")
+
+  pdf("04-figs/Fig06d-km_subtype.pdf", width = 7, height = 6)
+  print(p_km)
+  dev.off()
+  png("04-figs/Fig06d-km_subtype.png", width = 7, height = 6, units = "in", res = 300)
+  print(p_km)
+  dev.off()
+}
 ```
 
 **pheatmap notes:**
-- **Do NOT re-scale** — data is already z-scored per variable in Phase 4. Just cap at ±2.
-- **`treeheight_row = 15`** — shrink clustering tree (default 50 is too tall).
-- **Must transpose** — input is samples×variables, pheatmap needs variables as rows for readable y-axis labels.
-- **`cluster_cols = FALSE`** — columns (samples) are ordered by subtype, clustering would destroy ordering.
-- **`gaps_col`** (not `gaps_row`) — since samples are columns, gaps go between column groups.
-- **`annotation_col`** (not `annotation_row`) — subtype annotation applies to samples (columns).
+- **Do NOT re-scale** — data is already z-scored in Phase 4. Just cap at ±2.
+- **`treeheight_row = 15`** — shrink clustering tree.
+- **Must transpose** — pheatmap needs variables as rows for readable y-axis labels.
+- **`cluster_cols = FALSE`** — columns ordered by subtype, clustering would destroy ordering.
 - **CRITICAL: Do NOT use `grep("CIBERSORT")` in merged data** — cibersort + cibersort_abs share cell names. Read from original cibersort CSV instead.
 
-#### Fig 05: TME Correlation Matrix Heatmap
+#### Fig 07a-e: Most Significant Positive Variable Per Subtype (sig_box + patchwork)
 
-Use `pheatmap` on the correlation matrix saved in Phase 4. **Must deduplicate** — cibersort + cibersort_abs share cell names, so `.y` columns duplicate `.x`. Keep only `.x`, drop `.y`, clean suffix for display.
-
-```r
-load("04-figs/data/06-cor_matrix_full.RData")
-
-# Deduplicate: keep .x (cibersort), drop .y (cibersort_abs)
-keep <- !grepl("\\.[xy]$", rownames(cor_mat)) | grepl("\\.x$", rownames(cor_mat))
-cor_mat <- cor_mat[keep, keep]
-rownames(cor_mat) <- sub("\\.x$", "", rownames(cor_mat))
-colnames(cor_mat) <- sub("\\.x$", "", colnames(cor_mat))
-
-pheatmap::pheatmap(cor_mat, fontsize = 6, fontsize_row = 5, fontsize_col = 5,
-                    color = colorRampPalette(c("#2166AC", "white", "#B2182B"))(100),
-                    border_color = NA, main = "TME Cell Correlation Matrix")
-```
-
-#### Fig 06: Top 10 Wilcoxon Boxplots — 2×5 patchwork Composite
+For each method group, find the most significant and positive variable for each TME subtype, create one `sig_box` per subtype, and combine with patchwork.
 
 ```r
 library(patchwork)
 
-# Load top 10 wilcoxon results
-wilcox_res <- read.csv("04-figs/data/04-wilcoxon_results.csv")
-wilcox_res <- wilcox_res[order(wilcox_res$pvalue), ]
-top10 <- head(wilcox_res, 10)
-
-# Generate individual boxplots
-box_list <- lapply(seq_len(nrow(top10)), function(i) {
-  sig_box(data = tme_pdata, signature = top10$feature[i],
-          variable = cat_var, palette = "paired1",
-          show_pvalue = TRUE, size_of_pvalue = 5,
-          hjust = 1, angle_x_text = 60, size_of_font = 8) +
-    theme(axis.title = element_text(size = 5),
-          axis.text.y = element_text(size = 5),
-          plot.title = element_text(size = 5),
-          plot.margin = margin(12, 5, 5, 5))
-})
-
-# Arrange as 2×5 grid — height 160mm to show statistical annotations
-p_combined <- wrap_plots(box_list, ncol = 5, nrow = 2)
-
-ggsave("04-figs/Fig06-top10_wilcoxon_boxplot.png", p_combined,
-       width = 250, height = 220, units = "mm", dpi = 300)
-ggsave("04-figs/Fig06-top10_wilcoxon_boxplot.pdf", p_combined,
-       width = 250, height = 220, units = "mm")
-```
-
-**sig_box parameters for multi-panel layouts (MUST follow):**
-- `palette = "paired1"` — supported palettes: `nrc, jama, aaas, jco, paired1-4, accent, set2` (no lancet).
-- `show_pvalue = TRUE, size_of_pvalue = 5` — show p-value annotation.
-- `hjust = 1, angle_x_text = 60, size_of_font = 8` — angled x-axis labels for readability.
-- `plot.margin = margin(12, 5, 5, 5)` — increased top margin so p-value is not clipped by title.
-- `sig_box()` has no `method` parameter — statistical test is auto-selected.
-
-#### Fig 07a-d: Forest Plots — Grouped by Method (Custom ggplot2)
-
-**CRITICAL**: Do NOT use `sig_forest()` for survival forest plots. It uses `coord_trans(x = "log2")` with only 3 fixed breaks (0.5, 1, 1.5), which breaks when HR values span extreme ranges (0 to 1,000,000+). Use a custom ggplot2 forest plot instead.
-
-Split into 4 method groups and build custom forest plots with log2 scale, text annotations (HR, 95% CI, P value), and proper handling of extreme values:
-
-```r
-surv_tme <- read.csv("04-figs/data/05-surv_tme_cells.csv")
-surv_sig <- read.csv("04-figs/data/05-surv_signatures.csv")
-
-make_forest <- function(data, title, filename, max_n = 20) {
-  data <- data[order(data$P), ]
-  data <- head(data, max_n)
-  if (nrow(data) == 0) { cat("  Skipping:", title, "\n"); return() }
-
-  # Ensure numeric + complete cases
-  for (col in c("HR", "CI_low_0.95", "CI_up_0.95", "P"))
-    data[[col]] <- as.numeric(data[[col]])
-  data <- data[complete.cases(data[, c("HR", "CI_low_0.95", "CI_up_0.95", "P")]), ]
-  if (nrow(data) == 0) return()
-
-  # Format display labels — clean .x/.y suffix and deduplicate
-  data$label <- sub("\\.[xy]$", "", data$ID)
-  data$label <- strtrim(data$label, 30)
-  dup <- duplicated(data$label)
-  if (any(dup)) data$label[dup] <- paste0(data$label[dup], "_", seq_len(sum(dup)))
-  data <- data[order(data$HR, decreasing = FALSE), ]
-  data$label <- factor(data$label, levels = data$label)
-
-  # Format text columns
-  data$HR_text <- ifelse(data$HR >= 100, sprintf("%.0f", data$HR),
-                  ifelse(data$HR >= 0.01, sprintf("%.2f", data$HR), sprintf("%.4f", data$HR)))
-  data$CI_text <- paste0(
-    ifelse(data$CI_low_0.95 >= 100, sprintf("%.0f", data$CI_low_0.95),
-    ifelse(data$CI_low_0.95 >= 0.01, sprintf("%.2f", data$CI_low_0.95), sprintf("%.4f", data$CI_low_0.95))),
-    "-",
-    ifelse(data$CI_up_0.95 >= 100, sprintf("%.0f", data$CI_up_0.95),
-    ifelse(data$CI_up_0.95 >= 0.01, sprintf("%.2f", data$CI_up_0.95), sprintf("%.4f", data$CI_up_0.95))))
-  data$P_text <- ifelse(data$P < 0.001, sprintf("%.2e", data$P), sprintf("%.3f", data$P))
-
-  # Log2 transform with cap for extreme values
-  cap <- 10
-  data$logHR    <- log2(data$HR);       data$logHR[!is.finite(data$logHR)] <- 0
-  data$logCI_low <- log2(data$CI_low_0.95); data$logCI_low[!is.finite(data$logCI_low)] <- -cap
-  data$logCI_up  <- log2(data$CI_up_0.95);  data$logCI_up[!is.finite(data$logCI_up)]   <-  cap
-  data$logCI_low <- pmax(data$logCI_low, -cap)
-  data$logCI_up  <- pmin(data$logCI_up,   cap)
-
-  # Build ggplot
-  p <- ggplot(data, aes(x = logHR, y = label)) +
-    geom_errorbarh(aes(xmin = logCI_low, xmax = logCI_up),
-                   height = 0.2, linewidth = 0.8, color = "grey30") +
-    geom_point(aes(color = P), size = 3.5) +
-    geom_vline(xintercept = 0, linetype = "dashed", color = "grey50", linewidth = 0.5) +
-    scale_color_gradientn(colors = c("#B2182B", "#EF8A62", "#FDDBC7", "#D1E5F0", "#2166AC"),
-                          name = "P value", trans = "log10") +
-    geom_text(aes(x = cap + 1.5, label = HR_text), hjust = 0, size = 2.5) +
-    geom_text(aes(x = cap + 4.5, label = CI_text), hjust = 0, size = 2.5, color = "grey30") +
-    geom_text(aes(x = cap + 9.5, label = P_text), hjust = 0, size = 2.5, color = "grey30") +
-    annotate("text", x = cap + 1.5, y = nrow(data) + 1.5, label = "HR", hjust = 0, size = 2.5, fontface = "bold") +
-    annotate("text", x = cap + 4.5, y = nrow(data) + 1.5, label = "95% CI", hjust = 0, size = 2.5, fontface = "bold") +
-    annotate("text", x = cap + 9.5, y = nrow(data) + 1.5, label = "P value", hjust = 0, size = 2.5, fontface = "bold") +
-    scale_x_continuous(breaks = c(-8,-4,-2,-1,0,1,2,4,8),
-                       labels = c("1/256","1/16","1/4","0.5","1","2","4","16","256")) +
-    coord_cartesian(xlim = c(-cap, cap + 13), clip = "off") +
-    labs(x = "Hazard Ratio (log2 scale)", y = "", title = title) +
-    theme_light() + theme(
-      axis.text.y = element_text(size = 7), axis.text.x = element_text(size = 7),
-      plot.title = element_text(size = 10, hjust = 0.5, face = "bold"),
-      legend.position = "bottom", plot.margin = margin(5, 40, 5, 5, "mm"))
-
-  plot_h <- max(4, nrow(data) * 0.4 + 1.5)
-  ggsave(paste0("04-figs/", filename, ".png"), p, width = 12, height = plot_h, units = "in", dpi = 300)
-  ggsave(paste0("04-figs/", filename, ".pdf"), p, width = 12, height = plot_h)
-}
-
-# 07a: CIBERSORT
-cb_surv <- surv_tme[grepl("CIBERSORT", surv_tme$ID), ]
-make_forest(cb_surv, "CIBERSORT Survival Forest", "Fig07a-forest_cibersort")
-
-# 07b: Other TME methods
-other_surv <- surv_tme[!grepl("CIBERSORT", surv_tme$ID), ]
-make_forest(other_surv, "Other TME Methods Survival Forest", "Fig07b-forest_other_tme")
-
-# 07c: TME signatures (non-GO/KEGG)
-gkegg_pattern <- "^HALLMARK_|^KEGG_|^GO_|^REACTOME_"
-tme_sig_surv <- surv_sig[!grepl(gkegg_pattern, surv_sig$ID), ]
-make_forest(tme_sig_surv, "TME Signatures Survival Forest", "Fig07c-forest_tme_signature")
-
-# 07d: GO/KEGG/Hallmark pathways
-gkegg_surv <- surv_sig[grepl(gkegg_pattern, surv_sig$ID), ]
-make_forest(gkegg_surv, "Pathway Survival Forest", "Fig07d-forest_go_kegg")
-```
-
-**Key notes:**
-- **Do NOT use `sig_forest()`** — it only has 3 fixed axis breaks (0.5, 1, 1.5) and breaks with extreme HR values. Custom ggplot2 forest plot handles all cases.
-- **Custom forest plot features**: log2 scale with 9 breaks, text annotations for HR/CI/P, capped error bars for extreme values, dynamic plot height.
-- **Split into 4 groups** (07a-d) for readability: CIBERSORT, Other TME, TME Signatures, GO/KEGG/Hallmark.
-
-#### Fig 08: KM Plots — p<0.005 Significant Variables
-
-```r
-# sig_surv_plot() saves its own output — do NOT wrap with ggsave()
-# Create kmplot subdirectory first
-dir.create("04-figs/kmplot", showWarnings = FALSE, recursive = TRUE)
-
-# Merge TME + signature survival results
-surv_all <- rbind(surv_tme, surv_sig)
-surv_sorted <- surv_all[order(surv_all$P), ]
-sig_vars <- surv_sorted$ID[surv_sorted$P < 0.005]
-if (length(sig_vars) == 0) sig_vars <- surv_sorted$ID[surv_sorted$P < 0.01]
-
-surv_data <- read.csv("04-figs/data/01-tme_pdata_merged.csv")
-
-for (i in seq_along(sig_vars)) {
-  sig_surv_plot(input_pdata = surv_data, signature = sig_vars[i],
-                time = time_col, status = status_col, time_type = "month",
-                palette = "jama", mini_sig = "score",
-                fig.type = "pdf", save_path = "04-figs/kmplot",
-                project = paste0("KM_", i), index = i)
-}
-```
-
-**Key notes:**
-- **`sig_surv_plot()` / `roc_time()` save their own output** — Do NOT wrap with `ggsave()`. Use their `save_path` / `path` and `fig.type` / `fig_type` parameters.
-- **KM plots saved to `04-figs/kmplot/` subfolder** — each variable generates multiple files (best-cutoff, 3-group, 2-group KM plots + RData).
-- `time_type`: `"day"`, `"month"`, or `"year"`
-- `mini_sig`: `"score"` (continuous, auto-split by median) or `"category"` (already grouped)
-
-#### Fig 09: TME Subtype Boxplots — Top Feature Per Subtype, Patchwork Composite
-
-For each TME subtype, find the CIBERSORT cell type with highest mean z-score, then create one `sig_box` per subtype and combine with patchwork.
-
-**Helper function** — `find_top_feature_per_subtype`:
-```r
-# For each TME subtype, find the cell type with highest mean (scaled z-score)
-# Returns named vector: subtype -> column name
-find_top_feature_per_subtype <- function(data, cell_cols, subtype_col = "TME_subtype") {
+find_top_positive_per_subtype <- function(data, cell_cols, subtype_col = "TME_subtype") {
   subtypes <- sort(unique(data[[subtype_col]]))
   result <- character(0)
   for (st in subtypes) {
@@ -899,47 +874,187 @@ find_top_feature_per_subtype <- function(data, cell_cols, subtype_col = "TME_sub
   }
   return(result)
 }
-```
 
-```r
-# Read CIBERSORT columns from original file
-cb_cols <- setdiff(colnames(tme_cb), "ID")
-cb_cols <- cb_cols[!grepl(paste(qc_patterns, collapse = "|"), cb_cols)]
-cb_sc <- intersect(cb_cols, colnames(tme_sc))
-if (length(cb_sc) == 0) cb_sc <- intersect(paste0(cb_cols, ".x"), colnames(tme_sc))
+make_subtype_boxplot_panel <- function(data, method_cols, subtype_col, title, filename) {
+  top_cells <- find_top_positive_per_subtype(data, method_cols, subtype_col)
+  subtypes <- names(top_cells)
 
-# For each subtype, find top cell (highest scaled mean)
-subtypes <- sort(unique(tme_sc$TME_subtype))
-subtype_top_cells <- character(0)
-for (st in subtypes) {
-  st_data <- tme_sc[tme_sc$TME_subtype == st, cb_sc]
-  cell_means <- colMeans(st_data, na.rm = TRUE)
-  subtype_top_cells[st] <- names(sort(cell_means, decreasing = TRUE))[1]
+  box_list <- lapply(subtypes, function(st) {
+    col <- top_cells[st]
+    clean_name <- sub("\\.[xy]$", "", col)
+    sig_box(data = data, signature = col, variable = subtype_col,
+            palette = "paired1", show_pairwise_p = TRUE,
+            angle_x_text = 60, hjust = 1,
+            size_of_pvalue = 3, size_of_font = 5) +
+      ggtitle(paste0(st, ": ", clean_name)) +
+      theme(axis.title = element_text(size = 6),
+            axis.text.y = element_text(size = 5),
+            plot.title = element_text(size = 7),
+            plot.margin = margin(12, 5, 5, 5))
+  })
+
+  p <- wrap_plots(box_list, ncol = length(subtypes))
+  ggsave(paste0("04-figs/", filename, ".png"), p,
+         width = 50 * length(subtypes), height = 100, units = "mm", dpi = 300)
+  ggsave(paste0("04-figs/", filename, ".pdf"), p,
+         width = 50 * length(subtypes), height = 100, units = "mm")
 }
 
-# One sig_box per subtype, patchwork composite
-box09_list <- lapply(subtypes, function(st) {
-  col <- subtype_top_cells[st]
-  clean_name <- sub("\\.[xy]$", "", col)
-  sig_box(data = tme_sc, signature = col,
-          variable = "TME_subtype", palette = "paired1",
-          show_pvalue = TRUE, size_of_pvalue = 5,
-          hjust = 1, angle_x_text = 60, size_of_font = 8) +
-    ggtitle(paste0(st, ": ", clean_name)) +
-    theme(axis.title = element_text(size = 6),
-          axis.text.y = element_text(size = 5),
-          plot.title = element_text(size = 7),
-          plot.margin = margin(12, 5, 5, 5))
-})
-p09 <- wrap_plots(box09_list, ncol = length(subtypes))
+# Fig07a: CIBERSORT
+make_subtype_boxplot_panel(tme_scaled, cb_sc, "TME_subtype",
+                           "CIBERSORT Subtype Boxplots", "Fig07a-boxplot_cibersort_subtype")
 
-ggsave("04-figs/Fig09-subtype_boxplot.png", p09,
-       width = 50 * length(subtypes), height = 100, units = "mm", dpi = 300)
-ggsave("04-figs/Fig09-subtype_boxplot.pdf", p09,
-       width = 50 * length(subtypes), height = 100, units = "mm")
+# Fig07b: MCPcounter
+make_subtype_boxplot_panel(tme_scaled, mcp_sc, "TME_subtype",
+                           "MCPcounter Subtype Boxplots", "Fig07b-boxplot_mcpcounter_subtype")
+
+# Fig07c: xCell
+make_subtype_boxplot_panel(tme_scaled, xc_sc, "TME_subtype",
+                           "xCell Subtype Boxplots", "Fig07c-boxplot_xcell_subtype")
+
+# Fig07d: TME signatures
+# Identify TME signature columns from Phase 3 output
+tme_sig_sc <- colnames(tme_scaled)[colnames(tme_scaled) %in% sig_tme_names]
+if (length(tme_sig_sc) > 0) {
+  make_subtype_boxplot_panel(tme_scaled, tme_sig_sc, "TME_subtype",
+                             "TME Signatures Subtype Boxplots", "Fig07d-boxplot_tme_signature_subtype")
+}
+
+# Fig07e: GO/KEGG/Hallmark
+pathway_sc <- grep("^HALLMARK_|^KEGG_|^GO_|^REACTOME_", colnames(tme_scaled), value = TRUE)
+if (length(pathway_sc) > 0) {
+  make_subtype_boxplot_panel(tme_scaled, pathway_sc, "TME_subtype",
+                             "Pathway Subtype Boxplots", "Fig07e-boxplot_pathway_subtype")
+}
 ```
 
-**Note**: Uses CIBERSORT columns from scaled data (Phase 4 output). Each subtype's top cell is the one with highest mean z-score in that subtype — this is the most representative feature for that cluster.
+#### Fig 08a-b: Top 10 Differential Boxplots (IF categorical variables exist)
+
+For each binary variable: `batch_wilcoxon()` → top 10 → `sig_box` + patchwork (2×5).
+For each multi-level categorical variable: `batch_kruskal()` → top 10 → `sig_box` + patchwork (2×5).
+
+```r
+pdata_summary <- read.csv("02-input/pdata_summary.csv")
+cat_vars <- pdata_summary$var[pdata_summary$type %in% c("factor", "binary")]
+fig_idx <- 0
+
+if (length(cat_vars) > 0) {
+  # Collect ALL TME variables (deconvolution + signatures + pathways)
+  # MUST filter to NUMERIC columns only — batch_wilcoxon/batch_kruskal require numeric features
+  pdata_col_set <- colnames(pdata)
+  all_tme_vars <- setdiff(colnames(tme_pdata), pdata_col_set)
+  all_tme_vars <- setdiff(all_tme_vars, "ID")
+  # Keep only columns that are numeric
+  all_tme_vars <- all_tme_vars[sapply(tme_pdata[, all_tme_vars], is.numeric)]
+
+  for (v in cat_vars) {
+    lvls <- unique(tme_pdata[[v]])
+    lvls <- lvls[!is.na(lvls)]
+
+    if (length(lvls) >= 2) {
+      fig_idx <- fig_idx + 1
+      fig_letter <- letters[fig_idx]  # a, b, c, ...
+
+      if (length(lvls) == 2) {
+        # Binary: Wilcoxon
+        diff_res <- batch_wilcoxon(data = tme_pdata, target = v, feature = all_tme_vars)
+      } else {
+        # Multi-level: Kruskal
+        diff_res <- batch_kruskal(data = tme_pdata, target = v, feature = all_tme_vars)
+      }
+
+      diff_res <- diff_res[order(diff_res$p.value), ]
+      top10 <- head(diff_res, 10)
+      write.csv(diff_res, file = paste0("04-figs/data/04-diff_", v, ".csv"), row.names = FALSE)
+
+      if (nrow(top10) > 0) {
+        box_list <- lapply(seq_len(nrow(top10)), function(i) {
+          sig_box(data = tme_pdata, signature = top10$sig_names[i],
+                  variable = v, palette = "paired1", show_pairwise_p = TRUE,
+                  angle_x_text = 60, hjust = 1,
+                  size_of_pvalue = 3, size_of_font = 5) +
+            theme(axis.title = element_text(size = 5),
+                  axis.text.y = element_text(size = 5),
+                  plot.title = element_text(size = 5),
+                  plot.margin = margin(12, 5, 5, 5))
+        })
+
+        p_combined <- wrap_plots(box_list, ncol = 5, nrow = 2)
+        ggsave(paste0("04-figs/Fig08", fig_letter, "-top10_", v, ".png"), p_combined,
+               width = 250, height = 220, units = "mm", dpi = 300)
+        ggsave(paste0("04-figs/Fig08", fig_letter, "-top10_", v, ".pdf"), p_combined,
+               width = 250, height = 220, units = "mm")
+      }
+    }
+  }
+}
+```
+
+**Key notes:**
+- **Binary variable** (2 levels): use `batch_wilcoxon()`.
+- **Multi-level variable** (≥3 levels): use `batch_kruskal()`.
+- Both return tibble with columns: `sig_names`, `p.value`, `statistic`, `p.adj`, `log10pvalue`, `stars`.
+- One figure per categorical variable: Fig08a for variable1, Fig08b for variable2, etc.
+
+#### Fig 09: 8 KM Plots (IF survival data exists)
+
+Select most positive (lowest HR, protective) and most negative (highest HR, risk) variable from each of 4 groups:
+1. CIBERSORT → a (most positive), b (most negative)
+2. Other TME methods → c, d
+3. TME signatures → e, f
+4. GO/KEGG/Hallmark → g, h
+
+Total: up to 8 KM plots saved to `04-figs/kmplot/`.
+
+```r
+if (length(time_cols) > 0 && length(status_cols) > 0) {
+  dir.create("04-figs/kmplot", showWarnings = FALSE, recursive = TRUE)
+
+  find_extreme_hr <- function(surv_res, group_cols) {
+    if (is.null(surv_res) || nrow(surv_res) == 0) return(character(0))
+    group_res <- surv_res[surv_res$ID %in% group_cols, ]
+    if (nrow(group_res) == 0) return(character(0))
+    group_res <- group_res[complete.cases(group_res[, c("HR", "P")]), ]
+    if (nrow(group_res) == 0) return(character(0))
+    # Most positive (lowest HR = protective), most negative (highest HR = risk)
+    most_pos <- group_res$ID[which.min(group_res$HR)]
+    most_neg <- group_res$ID[which.max(group_res$HR)]
+    return(c(most_pos, most_neg))
+  }
+
+  # Collect all survival results
+  surv_all <- rbind(cb_surv, other_surv, tme_sig_surv, pathway_surv)
+  km_vars <- character(0)
+
+  # Group 1: CIBERSORT
+  km_vars <- c(km_vars, find_extreme_hr(surv_all, cb_sc))
+  # Group 2: Other TME methods
+  other_sc <- c(mcp_sc, epic_sc, xc_sc)
+  km_vars <- c(km_vars, find_extreme_hr(surv_all, other_sc))
+  # Group 3: TME signatures
+  km_vars <- c(km_vars, find_extreme_hr(surv_all, tme_sig_cols))
+  # Group 4: GO/KEGG/Hallmark
+  km_vars <- c(km_vars, find_extreme_hr(surv_all, pathway_cols))
+
+  km_vars <- unique(km_vars[nchar(km_vars) > 0])
+
+  surv_data <- read.csv("04-figs/data/01-tme_pdata_merged.csv")
+
+  for (i in seq_along(km_vars)) {
+    sig_surv_plot(input_pdata = surv_data, signature = km_vars[i],
+                  time = time_col, status = status_col, time_type = "month",
+                  palette = "jama", mini_sig = "score",
+                  fig.type = "pdf", save_path = "04-figs/kmplot",
+                  project = paste0("KM_", i), index = i)
+  }
+}
+```
+
+**Key notes:**
+- **`sig_surv_plot()` saves its own output** — Do NOT wrap with `ggsave()`.
+- **KM plots saved to `04-figs/kmplot/`** — each variable generates PDF + RData.
+- `mini_sig = "score"` — continuous variable, auto-split by median.
+- `time_type`: `"day"`, `"month"`, or `"year"`.
 
 # Clean up stray Rplots.pdf (generated by some IOBR internal plot calls)
 # Suppress with `pdf(NULL)` at top of visualization script
@@ -1019,87 +1134,170 @@ Pause and ask at:
 
 ---
 
-## 05-note Template: `IOBR-analysis-README.md`
+## Phase 6: Wrap-Up Note (MANDATORY — execute after ALL other phases complete)
 
-Generate a tree diagram with brief descriptions:
+**Do NOT skip this phase.** After Phase 5 visualization finishes and all log files are verified, you MUST:
+
+1. **List actual files** in `04-figs/`, `03-tme/`, `02-input/`, and `04-figs/data/` to build the tree from reality
+2. **Write `05-note/IOBR-analysis-README.md`** with:
+   - IOBR citation header at top
+   - ASCII tree diagram showing ACTUAL outputs (not template placeholders)
+   - Brief interpretation of key findings (deconvolution method count, subtype count, top survival hits, available figures)
+3. Count figures, tables, and log files — report these numbers in the summary
+
+### Key Findings to Extract (auto-detect from output files)
+
+Before writing the note, scan the output:
+
+```bash
+# Count figures generated
+echo "=== Figures ===" && ls 04-figs/Fig*.png | wc -l
+
+# Deconvolution methods succeeded
+echo "=== TME CSVs ===" && ls 03-tme/tme_*.csv
+
+# Survival data availability
+echo "=== Survival ===" && ls 04-figs/data/05-surv_*.csv 2>/dev/null || echo "No survival data"
+
+# Subtype info
+echo "=== Subtypes ===" && head -5 04-figs/data/03-tme_subtype.csv
+
+# Log file check
+echo "=== Logs ===" && wc -l 06-log/*.log
+```
+
+### Template for `05-note/IOBR-analysis-README.md`
+
+```markdown
+# IOBR Citation:
+# Zeng DQ, Fang YR, … , Yu GC, Liao WJ.
+# Enhancing Immuno-Oncology Investigations Through Multidimensional Decoding of
+# Tumour Microenvironment with IOBR 2.0, Cell Reports Methods, 2024
+# https://doi.org/10.1016/j.crmeth.2024.100910
+
+# <Project Name> — TME Analysis Summary
+
+## Analysis Summary
+
+- Dataset: <N> samples, <data_type>
+- Deconvolution: <methods used, comma-separated>
+- Signature scoring: <method>
+- TME subtypes: <N> subtypes identified (K-means on CIBERSORT)
+
+## Key Findings
+
+<3-5 bullet points summarizing the most important results>
+
+## Output Directory Tree
 
 ```
 project/
 ├── 01-script/
-│   ├── 01-data_preprocessing.R      # QC, normalization, annotation
-│   ├── 02-tme_deconvolution.R       # TME cell type deconvolution
-│   ├── 03-signature_analysis.R      # Signature scoring
-│   ├── 04-statistical_analysis.R    # Statistics, clustering, survival
-│   └── 05-visualization.R           # All figures
+│   ├── 01-data_preprocessing.R
+│   ├── 02-tme_deconvolution.R
+│   ├── 03-signature_analysis.R
+│   ├── 04-statistical_analysis.R
+│   └── 05-visualization.R
 ├── 02-input/
-│   ├── annotated_eset.csv           # Normalized expression matrix
-│   └── pdata.csv                    # Phenotype data
+│   ├── annotated_eset.csv
+│   ├── pdata.csv
+│   └── pdata_summary.csv
 ├── 03-tme/
-│   ├── tme_cibersort.csv            # CIBERSORT results
-│   ├── tme_mcpcounter.csv           # MCPcounter results
-│   ├── sig_score_tme.csv            # ssGSEA scores
-│   └── tme_sig_combine.csv          # All merged results
+│   ├── tme_cibersort.csv            # CIBERSORT: 22 cell types
+│   ├── tme_mcpcounter.csv           # MCPcounter: 8 cell populations
+│   ├── tme_estimate.csv             # ESTIMATE: 4 scores
+│   ├── sig_score_tme.csv            # TME signature scores (ssGSEA)
+│   └── tme_sig_combine.csv          # Merged master table
 ├── 04-figs/
 │   ├── Fig01-barplot_cibersort.png/pdf
 │   ├── Fig02-barplot_epic.png/pdf
-│   ├── Fig03-heatmap_cibersort_subtype.png/pdf   (pheatmap)
-│   ├── Fig04-heatmap_mcpcounter_subtype.png/pdf  (pheatmap)
+│   ├── Fig03a-heatmap_cibersort.png/pdf
+│   ├── Fig03b-heatmap_mcpcounter.png/pdf
+│   ├── Fig03c-heatmap_xcell.png/pdf
+│   ├── Fig04a-forest_cibersort.png/pdf     # (IF survival)
+│   ├── Fig04b-forest_other_tme.png/pdf     # (IF survival)
+│   ├── Fig04c-forest_tme_signature.png/pdf # (IF survival)
+│   ├── Fig04d-forest_go_kegg.png/pdf       # (IF survival)
 │   ├── Fig05-cor_matrix.png/pdf
-│   ├── Fig06-top10_wilcoxon_boxplot.png/pdf
-│   ├── Fig07a-forest_cibersort.png/pdf
-│   ├── Fig07b-forest_other_tme.png/pdf
-│   ├── Fig07c-forest_tme_signature.png/pdf
-│   ├── Fig07d-forest_go_kegg.png/pdf
-│   ├── kmplot/                        # KM survival plots (auto-saved by sig_surv_plot)
-│   └── Fig09-subtype_boxplot.png/pdf
-│   └── data/                        # Statistical result tables
-│       ├── 01-tme_pdata_merged.csv
-│       ├── 02-tme_scaled.csv
-│       ├── 03-tme_subtype.csv
-│       ├── 04-wilcoxon_results.csv
-│       ├── 05-surv_results.csv
-│       └── 06-cor_matrix.csv
+│   ├── Fig06a-heatmap_cibersort_subtype.png/pdf
+│   ├── Fig06b-heatmap_mcpcounter_subtype.png/pdf
+│   ├── Fig06c-heatmap_xcell_subtype.png/pdf
+│   ├── Fig06d-km_subtype.png/pdf           # (IF survival)
+│   ├── Fig07a-boxplot_cibersort_subtype.png/pdf
+│   ├── Fig07b-boxplot_mcpcounter_subtype.png/pdf
+│   ├── Fig07c-boxplot_xcell_subtype.png/pdf
+│   ├── Fig07d-boxplot_tme_signature_subtype.png/pdf
+│   ├── Fig07e-boxplot_pathway_subtype.png/pdf
+│   ├── Fig08a-top10_<var1>.png/pdf         # (IF categorical)
+│   ├── Fig08b-top10_<var2>.png/pdf         # (IF categorical)
+│   ├── kmplot/                             # KM plots (IF survival)
+│   └── data/                               # Statistical result tables
 ├── 05-note/
-│   ├── IOBR-pipeline.md             # Analysis plan
-│   ├── pdata_summary.csv            # Variable summary
-│   └── IOBR-analysis-README.md      # This file
+│   ├── IOBR-pipeline.md
+│   └── IOBR-analysis-README.md
 └── 06-log/
     ├── 01-data_preprocessing.log
-    └── ...
+    ├── 02-tme_deconvolution.log
+    ├── 03-signature_analysis.log
+    ├── 04-statistical_analysis.log
+    └── 05-visualization.log
+```
 ```
 
-Include a brief summary of key findings below the tree.
+**After writing, present a one-paragraph summary to the user** listing figure count, log status, and key findings.
 
 ---
 
-## 06-log Directory
+## 06-log Directory (MANDATORY)
+
+**Every R script MUST be executed with log capture. No exceptions.**
 
 - One log file per script, named to match: `01-data_preprocessing.log`, `02-tme_deconvolution.log`, ...
 - Each log MUST begin with the IOBR citation header (same as scripts).
-- Capture logs by running scripts with redirection:
-  ```bash
-  { echo "# IOBR Citation:"; echo "# Zeng DQ et al., Cell Reports Methods, 2024"; echo "# https://doi.org/10.1016/j.crmeth.2024.100910"; echo ""; Rscript 01-script/01-data_preprocessing.R; } > 06-log/01-data_preprocessing.log 2>&1
-  ```
+- Logs capture both stdout and stderr for debugging and reproducibility.
+- After running all scripts, verify: `ls -la 06-log/` should show 5 non-empty log files.
+- If a script fails, check the log file for the error message.
+
+**Run EVERY script with this pattern:**
+
+```bash
+mkdir -p 06-log
+
+# Phase 1
+{ echo "# IOBR Citation:"; echo "# Zeng DQ et al., Cell Reports Methods, 2024"; echo "# https://doi.org/10.1016/j.crmeth.2024.100910"; echo ""; Rscript 01-script/01-data_preprocessing.R; } > 06-log/01-data_preprocessing.log 2>&1
+
+# Phase 2
+{ echo "# IOBR Citation:"; echo "# Zeng DQ et al., Cell Reports Methods, 2024"; echo "# https://doi.org/10.1016/j.crmeth.2024.100910"; echo ""; Rscript 01-script/02-tme_deconvolution.R; } > 06-log/02-tme_deconvolution.log 2>&1
+
+# Phase 3
+{ echo "# IOBR Citation:"; echo "# Zeng DQ et al., Cell Reports Methods, 2024"; echo "# https://doi.org/10.1016/j.crmeth.2024.100910"; echo ""; Rscript 01-script/03-signature_analysis.R; } > 06-log/03-signature_analysis.log 2>&1
+
+# Phase 4
+{ echo "# IOBR Citation:"; echo "# Zeng DQ et al., Cell Reports Methods, 2024"; echo "# https://doi.org/10.1016/j.crmeth.2024.100910"; echo ""; Rscript 01-script/04-statistical_analysis.R; } > 06-log/04-statistical_analysis.log 2>&1
+
+# Phase 5
+{ echo "# IOBR Citation:"; echo "# Zeng DQ et al., Cell Reports Methods, 2024"; echo "# https://doi.org/10.1016/j.crmeth.2024.100910"; echo ""; Rscript 01-script/05-visualization.R; } > 06-log/05-visualization.log 2>&1
+```
 
 ---
 
 ## Quick Start Checklist
 
 1. [ ] Check IOBR installation in base environment
-2. [ ] Create project directory structure (01-script through 06-log + 04-figs/data)
+2. [ ] Create project directory structure (01-script through 06-log + 04-figs/data + 04-figs/kmplot)
 3. [ ] Confirm data source, type, and species with user
 4. [ ] Generate `05-note/IOBR-pipeline.md` — present to user for approval
-5. [ ] Write `01-data_preprocessing.R` (with citation header), run, capture log
-6. [ ] Verify sample matching (eset vs pdata), generate `05-note/pdata_summary.csv`
+5. [ ] Write `01-data_preprocessing.R` (with citation header), run with log capture to `06-log/`
+6. [ ] Verify sample matching (eset vs pdata), generate `02-input/pdata_summary.csv`
 7. [ ] Ask user to choose deconvolution method(s)
-8. [ ] Write `02-tme_deconvolution.R`, run, capture log
+8. [ ] Write `02-tme_deconvolution.R`, run with log capture to `06-log/`
 9. [ ] Ask user about scoring method and gene sets
-10. [ ] Write `03-signature_analysis.R`, run, capture log
+10. [ ] Write `03-signature_analysis.R`, run with log capture to `06-log/`
 11. [ ] Write `04-statistical_analysis.R` — merge, scale, cluster, test, correlate, save to 04-figs/data/
-12. [ ] Ask user about palette preferences
-13. [ ] Write `05-visualization.R` — follow strict Fig01–09 ordering
-14. [ ] Generate `05-note/IOBR-analysis-README.md`
-15. [ ] Verify all 06-log files have citation headers
+12. [ ] Write `05-visualization.R` — follow Fig01→09 ordering with conditional figures (survival, categorical)
+13. [ ] Run `05-visualization.R` with log capture to `06-log/`
+14. [ ] **Phase 6 (MANDATORY):** List actual outputs → count figures/tables/logs → extract key findings → write `05-note/IOBR-analysis-README.md` with tree + summary
+15. [ ] Verify all 5 log files in `06-log/` are non-empty with citation headers
 
 ---
 
