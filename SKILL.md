@@ -51,6 +51,24 @@ BiocManager::install("IOBR/IOBR")
 
 IOBRportal is NOT required — all core functionality is in IOBR itself.
 
+### Required Dependencies
+
+IOBR relies on several packages that are NOT auto-installed. Install these before starting:
+
+```r
+# For CIBERSORT
+BiocManager::install("preprocessCore")
+
+# For quanTIseq deconvolution
+install.packages("limSolve", repos = "https://cloud.r-project.org")
+
+# For tme_cluster()
+install.packages("NbClust", repos = "https://cloud.r-project.org")
+
+# For iobr_pca()
+install.packages("FactoMineR", repos = "https://cloud.r-project.org")
+```
+
 ### IOBR Built-in Data
 
 IOBR ships with rich built-in data — you rarely need external annotation files. For full details, read `references/iobr_built_in_data.md`. Key resources:
@@ -204,13 +222,14 @@ save(tme_combine, file = "03-tme/tme_combine.RData")
 
 #### Critical caveats:
 
-1. **CIBERSORT needs linear-scale data** — Anti-log first: `eset_linear <- 2^eset` if log2-transformed.
+1. **All deconvolution methods (except IPS) need linear-scale data** — Anti-log first: `eset_linear <- 2^eset` if log2-transformed. CIBERSORT, MCPcounter, ESTIMATE, EPIC, quanTIseq, xCell all warn "Data values appear small (<50)" when fed log2 data. Only IPS works with log2 data directly.
 2. **Column names have method suffix** — `T_cells_CD8_CIBERSORT`, `T_cells_MCPcounter`, etc.
 3. **Output CSV has `ID` column** — Set rownames: `rownames(df) <- df$ID; df$ID <- NULL`.
 4. **`arrays = TRUE`** for microarray; `perm = 1000` recommended for CIBERSORT.
-5. **`preprocessCore` required** — Install: `BiocManager::install("preprocessCore")`.
+5. **Required packages** — `preprocessCore` (CIBERSORT), `limSolve` (quanTIseq). Install before running.
 6. **TIMER requires `group_list`** — Provide cancer type per sample: `rep(tumor_type, ncol(eset))`.
 7. **quanTIseq parameters** — Use `tumor = TRUE, arrays = FALSE, scale_mrna = TRUE` for tumor samples.
+8. **Use `tryCatch`** for each method — some methods may fail on certain datasets. Wrap each call to avoid losing partial results.
 
 ### Phase 3: Signature Scoring and Pathway Analysis
 
@@ -273,10 +292,13 @@ save(tme_sig_combine, file = "03-tme/tme_sig_combine.RData")
 #### Key notes:
 
 1. **`pdata = NULL, adjust_eset = TRUE`** — This is the correct production pattern for `calculate_sig_score()`. Do NOT set `adjust_eset = FALSE` unless data is already properly scaled.
-2. **`signature_tme` is internal** — Access via `IOBR:::signature_tme` (triple colon).
-3. **`signature_collection` needs `data()`** — Call `data("signature_collection")` before use.
-4. **`IOBR::load_data()` downloads on first use** — Caches locally for subsequent calls.
-5. **Pathway scoring is computationally heavy** — Consider running Hallmark (50) and KEGG (186) first for quick results, then GO/Reactome for comprehensive analysis.
+2. **Method names are lowercase** — Use `"pca"`, `"ssgsea"`, `"zscore"`, `"integration"` (NOT uppercase `"PCA"`).
+3. **`signature_tme` is internal** — Access via `IOBR:::signature_tme` (triple colon).
+4. **`signature_collection` needs `data()`** — Call `data("signature_collection")` before use.
+5. **`IOBR::load_data()` downloads on first use** — Caches locally for subsequent calls.
+6. **Pathway scoring is computationally heavy** — Consider running Hallmark (50) and KEGG (186) first for quick results, then GO/Reactome for comprehensive analysis.
+7. **Use base R `merge()` for joining** — Not all environments have `tidyverse`. Prefer `merge(df1, df2, by = "ID")` over `%>% inner_join()`.
+8. **`tme_cluster()` requires NbClust** — Install: `install.packages("NbClust")`.
 
 Use `references/iobr_built_in_data.md` for the full signature catalog and `data("sig_group")` for filtering by category.
 
@@ -323,50 +345,58 @@ markers <- find_markers_in_bulk(pdata = pdata, eset = eset, group = "TME_subtype
 | `sig_roc()` | Multiple ROC curves for binary response prediction | Figure |
 
 ```r
-# Batch Cox regression
-surv_res <- batch_surv(pdata = pdata, tme_data = tme_result,
+# Step 1: Merge pdata with TME results first (batch_surv needs all columns in one data frame)
+surv_data <- merge(pdata, tme_result, by = "ID")
+
+# Batch Cox regression — variable = column names to test
+surv_res <- batch_surv(pdata = surv_data, variable = cell_cols,
                         time = "OS_time", status = "OS_status")
 
 # Subgroup survival (e.g., by stage, age group)
-sub_res <- subgroup_survival(pdata = pdata, variable = "T_cells_CD8_CIBERSORT",
+sub_res <- subgroup_survival(pdata = surv_data, variable = "T_cells_CD8_CIBERSORT",
                               group = "stage", time = "OS_time", status = "OS_status")
 
-# Single KM plot
-sig_surv_plot(input_pdata = pdata, signature = "T_cells_CD8_CIBERSORT",
-              time = "OS_time", status = "OS_status", time_type = "month",
-              palette = "jama", mini_sig = "score")
+# Forest plot — pass batch_surv output, signature = column name of variable IDs
+sig_forest(data = surv_res, signature = "ID", n = 20, text.size = 13)
 
-# Batch KM plots for multiple signatures
-batch_sig_surv_plot(input_pdata = pdata, signature = sig_group$immu_checkpoints,
+# Single KM plot — saves its own output (do NOT wrap with ggsave!)
+sig_surv_plot(input_pdata = surv_data, signature = "T_cells_CD8_CIBERSORT",
+              time = "OS_time", status = "OS_status", time_type = "month",
+              palette = "jama", mini_sig = "score",
+              fig.type = "png", save_path = "04-figs", index = 1)
+
+# Batch KM plots for multiple signatures — saves its own output
+batch_sig_surv_plot(input_pdata = surv_data, signature = cell_cols[1:4],
                      time = "OS_time", status = "OS_status", time_type = "month",
                      palette = "jama", fig_type = "pdf",
                      save_path = "04-figs/batch_km")
 
 # KM with risk table (auto split by median)
-surv_group(input_pdata = pdata, target_group = "TMEscoreA_CIR",
+surv_group(input_pdata = surv_data, target_group = "TMEscoreA_CIR",
            levels = c("High", "Low"), time = "OS_time", status = "OS_status",
            palette = "jama", width = 6, height = 6.5,
            save_path = "04-figs/surv_group.pdf")
 
-# Forest plot from batch_surv results
-sig_forest(data = surv_res, n = 20, color_option = 1, text.size = 13)
-
-# Time-dependent ROC
-roc_time(input = pdata, vars = c("T_cells_CD8_CIBERSORT", "TMEscoreA_CIR"),
+# Time-dependent ROC — saves its own output (do NOT wrap with ggsave!)
+roc_time(input = surv_data, vars = c("T_cells_CD8_CIBERSORT", "TMEscoreA_CIR"),
          time = "OS_time", status = "OS_status",
-         time_point = c(12, 36, 60), time_type = "month", palette = "jama")
+         time_point = c(12, 36, 60), time_type = "month", palette = "jama",
+         path = "04-figs", fig.type = "png", index = 1)
 
 # Binary ROC comparison
-sig_roc(data = pdata, response = "response",
+sig_roc(data = surv_data, response = "response",
         variables = c("TME_subtype", "T_cells_CD8_CIBERSORT"),
         compare = TRUE, palette = "jama")
 ```
 
 **Key notes:**
+- **`batch_surv()` requires merged pdata** — All variables must be columns in `pdata`. Use `merge()` first.
+- **`batch_surv()` parameter is `variable`** — A vector of column names, NOT a separate data frame.
+- **`batch_surv()` output columns**: `P`, `HR`, `CI_low_0.95`, `CI_up_0.95`, `ID` (the variable identifier).
+- **`sig_forest()` signature parameter** — A **column name** in `data` (e.g., `"ID"`), not a vector of names.
+- **`sig_surv_plot()` / `roc_time()` save their own output** — Do NOT wrap with `ggsave()`. Use their `save_path` / `path` and `fig.type` / `fig_type` parameters.
 - `time_type`: `"day"`, `"month"`, or `"year"` — tells IOBR how to interpret `time` column
-- `break_month`: `"auto"` or numeric vector for axis breaks
 - `mini_sig`: `"score"` (continuous, auto-split by median) or `"category"` (already grouped)
-- `sig_forest()` accepts output from `batch_surv()` directly — column names `P`, `HR`, `CI_low_0.95`, `CI_up_0.95` are expected
 
 #### 4.3 Batch Correlation Analysis + Scatter/Heatmap
 
@@ -415,8 +445,10 @@ wilcox_res <- batch_wilcoxon(data = merged_data, feature = cell_cols,
 
 # Boxplot with stats for key immune cells
 sig_box(data = merged_data, signature = "T_cells_CD8_CIBERSORT",
-        variable = "TME_subtype", method = "wilcox.test", palette_group = "jama")
+        variable = "TME_subtype", palette = "jama")
 ```
+
+**Note**: `sig_box()` parameter is `palette` (not `palette_group`), and has no `method` parameter — statistical test is auto-selected.
 
 #### 4.5 GSEA + Visualization
 
@@ -436,7 +468,7 @@ gsea_res <- sig_gsea(genesets = hallmark, gene_symbol = deg_res$gene,
 | `iobr_pca()` | PCA dimensionality reduction with scatter plot | Figure |
 
 ```r
-iobr_pca(pdata = pdata, eset = eset, group = "TME_subtype", scale = TRUE)
+iobr_pca(data = eset, pdata = pdata, group = "TME_subtype", scale = TRUE)
 ```
 
 #### 4.7 Other Analyses

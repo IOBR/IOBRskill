@@ -125,8 +125,10 @@ tme_cluster(input, features, id = "sample_id", scale = TRUE,
 ### `batch_surv()`
 Batch survival analysis — Cox regression for multiple variables.
 ```r
-batch_surv(pdata, tme_data, time, status, method = "cox")
+batch_surv(pdata, variable, time = "time", status = "status", best_cutoff = FALSE)
 ```
+- `variable`: Vector of **column names** in pdata to test. Must merge pdata + TME first.
+- Returns data frame with columns: `P`, `HR`, `CI_low_0.95`, `CI_up_0.95`, `ID`
 - Returns hazard ratios, confidence intervals, p-values for all variables.
 
 ### `subgroup_survival()`
@@ -221,11 +223,12 @@ percent_bar_plot(input, x, y, subset.x = NULL, color = NULL, palette = NULL,
 ### Boxplots
 
 ### `sig_box()`
-Boxplot with statistical comparisons (Wilcoxon/t-test/Kruskal).
+Boxplot with statistical comparisons.
 ```r
-sig_box(data, signature, variable, palette_group = "jama",
-        show_pvalue = TRUE, method = "wilcox.test")
+sig_box(data, signature, variable, palette = "nrc", cols = NULL,
+        jitter = FALSE, point_size = 5, show_pairwise_p = TRUE)
 ```
+- No `method` parameter — test is auto-selected. Use `palette` (not `palette_group`).
 
 ### Heatmaps
 
@@ -298,6 +301,8 @@ sig_forest(data, signature, pvalue = "P", HR = "HR",
            n = 10, max_character = 25, discrete_width = 35,
            color_option = 1, cols = NULL, text.size = 13)
 ```
+- `data`: Output from `batch_surv()` — must contain columns matching `signature`, `pvalue`, `HR`, etc.
+- `signature`: **Column name** in data containing variable names (e.g., `"ID"`)
 
 ### `roc_time()`
 Time-dependent ROC curves with AUC annotation at multiple time points.

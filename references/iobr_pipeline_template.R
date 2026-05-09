@@ -69,7 +69,7 @@ sig_res <- calculate_sig_score(
   eset           = eset,
   adjust_eset    = TRUE,
   signature      = signature_collection,   # 323 curated signatures
-  method         = "PCA",
+  method         = "pca",                 # lowercase!
   mini_gene_count = 2
 )
 
