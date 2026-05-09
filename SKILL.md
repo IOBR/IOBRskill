@@ -634,12 +634,20 @@ tme_scaled <- read.csv("04-figs/data/02-tme_scaled.csv")
 subtype_df <- read.csv("04-figs/data/03-tme_subtype.csv")
 tme_scaled <- merge(tme_scaled, subtype_df, by = "ID")
 
-# CIBERSORT heatmap by subtype — group = column name string, not vector
-cb_cols <- grep("_CIBERSORT$", colnames(tme_scaled), value = TRUE)
-cb_cols <- setdiff(cb_cols, grep("P[.]value|Correlation|RMSE", cb_cols, value = TRUE))
+# CIBERSORT heatmap by subtype — MUST use only cibersort (not cibersort_abs)
+# After merge, cibersort cols get .x suffix, cibersort_abs gets .y suffix
+# Read clean column names from original cibersort file, then match with .x suffix
+tme_cb <- read.csv("03-tme/tme_cibersort.csv")
+cb_cols_raw <- setdiff(colnames(tme_cb), "ID")
+cb_cols_raw <- cb_cols_raw[!grepl("^[Pp][.]|^Correlation|^RMSE", cb_cols_raw)]
 
-sig_heatmap(input = tme_scaled[, c("ID", cb_cols, "TME_subtype")],
-            features = cb_cols,
+# Match in scaled data — direct match first, then .x suffix fallback
+cb_sc <- intersect(cb_cols_raw, colnames(tme_scaled))
+if (length(cb_sc) == 0) cb_sc <- intersect(paste0(cb_cols_raw, ".x"), colnames(tme_scaled))
+cb_sc <- setdiff(cb_sc, "TME_subtype")
+
+sig_heatmap(input = tme_scaled[, c("ID", cb_sc, "TME_subtype")],
+            features = cb_sc,
             group = "TME_subtype",
             scale = TRUE, palette = 2, palette_group = "jama")
 
@@ -648,7 +656,8 @@ sig_heatmap(input = tme_scaled[, c("ID", cb_cols, "TME_subtype")],
 
 **sig_heatmap notes:**
 - **Exclude `group` column from `features`** — Use `setdiff(features, "TME_subtype")` to avoid "undefined columns" error.
-- **`sig_heatmap()` may produce `.x/.y` column suffixes** when multiple methods share cell type names (e.g., CIBERSORT + CIBERSORT_abs). Use `grep()` to find actual column names in merged data.
+- **CRITICAL: Do NOT use `grep("CIBERSORT")` to find columns in merged data** — cibersort and cibersort_abs share cell names, merge creates `.x/.y` suffixes, and grep catches both. Instead, read column names from the original cibersort CSV file and match with `.x` suffix fallback.
+- **MCPcounter doesn't have this issue** — its cell names are unique (`_MCPcounter` suffix).
 
 #### Fig 05: TME Correlation Matrix Heatmap
 
