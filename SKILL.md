@@ -146,8 +146,8 @@ eset <- log2eset(eset)
 
 Save output:
 ```r
-saveRDS(eset, file = "02-input/annotated_eset.rds")
-saveRDS(pdata, file = "02-input/pdata.rds")
+write.csv(eset,  file = "02-input/annotated_eset.csv")
+write.csv(pdata, file = "02-input/pdata.csv")
 ```
 
 ### Phase 2: TME Deconvolution
@@ -339,6 +339,12 @@ Every figure MUST:
 | 3 | Purple-orange |
 | 4–6 | Sequential gradients |
 
+**Cell bar plot** (`cell_bar_plot()` palette parameter, numeric 1–4):
+| # | Style |
+|---|-------|
+| 4 | Recommended — rich random palette with many distinct colors |
+| 1–3 | Alternative random palettes |
+
 If unsure which palette, present 3 options to the user and ask.
 
 #### Key visualization functions:
@@ -355,7 +361,63 @@ sig_surv_plot(...)     # Kaplan-Meier
 roc_time(...)          # Time-dependent ROC
 ```
 
-#### Export template:
+#### cell_bar_plot() — Cell Fraction Stacked Bar Plot
+
+MUST use IOBR's built-in `cell_bar_plot()` for TME composition bar plots. Do NOT write custom ggplot code.
+
+**Critical rules:**
+
+1. **Filter QC columns before plotting** — CIBERSORT output includes `P.value_CIBERSORT`, `Correlation_CIBERSORT`, `RMSE_CIBERSORT`. These are statistical metrics, NOT cell types. Use `features` parameter to specify only cell columns:
+```r
+qc_cols <- grep("^[Pp][.]", colnames(tme_cb), value = TRUE)
+qc_cols <- c(qc_cols, grep("^Correlation", colnames(tme_cb), value = TRUE),
+                  grep("^RMSE", colnames(tme_cb), value = TRUE))
+cell_cols <- setdiff(grep("_CIBERSORT$", colnames(tme_cb), value = TRUE), qc_cols)
+```
+
+2. **Legend formatting** — Legend MUST be compact, positioned on the right side, with:
+   - `legend.text = element_text(size = 5)`
+   - `legend.key.size = unit(2.5, "mm")`
+   - `legend.title = element_blank()`
+   - `guides(fill = guide_legend(ncol = 1))`
+
+3. **Sample labels** — If sample count > 50, hide sample IDs:
+```r
+if (n_samples > 50) {
+  p1 <- p1 + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
+}
+```
+
+4. **Figure dimensions** — `width = 180mm, height = 250mm` for `coord_flip = TRUE`
+
+**Complete template:**
+```r
+tme_cb <- read.csv("03-tme/tme_cibersort.csv")
+qc_cols <- grep("^[Pp][.]", colnames(tme_cb), value = TRUE)
+qc_cols <- c(qc_cols, grep("^Correlation", colnames(tme_cb), value = TRUE),
+                  grep("^RMSE", colnames(tme_cb), value = TRUE))
+cell_cols <- setdiff(grep("_CIBERSORT$", colnames(tme_cb), value = TRUE), qc_cols)
+
+p <- cell_bar_plot(input = tme_cb, id = "ID",
+                    features = cell_cols,
+                    title = "CIBERSORT TME Composition",
+                    coord_flip = TRUE, palette = 4,
+                    legend.position = "right")
+p <- p + guides(fill = guide_legend(ncol = 1)) +
+     theme(legend.text = element_text(size = 5),
+           legend.key.size = unit(2.5, "mm"),
+           legend.title = element_blank(),
+           plot.title = element_text(size = 10, hjust = 0.5))
+
+if (nrow(tme_cb) > 50) {
+  p <- p + theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
+}
+
+ggsave("04-figs/01-barplot_cibersort.png", p, width = 180, height = 250, units = "mm", dpi = 300)
+ggsave("04-figs/01-barplot_cibersort.pdf", p, width = 180, height = 250, units = "mm")
+```
+
+#### Export template (general figures):
 
 ```r
 # ggplot
@@ -397,8 +459,8 @@ project/
 │   ├── 04-statistical_analysis.R    # DEG, GSEA, LR, survival
 │   └── 05-visualization.R           # All figures
 ├── 02-input/
-│   ├── annotated_eset.rds           # Normalized expression matrix
-│   └── pdata.rds                    # Phenotype data
+│   ├── annotated_eset.csv           # Normalized expression matrix
+│   └── pdata.csv                    # Phenotype data
 ├── 03-tme/
 │   ├── tme_cibersort.csv            # CIBERSORT results
 │   ├── tme_mcpcounter.csv           # MCPcounter results
