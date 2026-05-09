@@ -639,29 +639,31 @@ ggsave("04-figs/Fig02-barplot_epic.pdf", p2, width = 180, height = 250, units = 
 
 ```r
 # Reusable helper for subtype heatmaps
+# Layout: cell types as ROWS, samples as COLUMNS, grouped by subtype
 plot_subtype_heatmap <- function(data, cols, subtype_col, title, prefix,
                                   width = 8, height = 6) {
   data <- data[order(data[[subtype_col]]), ]
-  mat <- as.matrix(data[, cols])  # data already z-score scaled from Phase 4
-  mat[mat > 2] <- 2; mat[mat < -2] <- -2  # cap
 
-  # Clean .x/.y suffix from column names
-  colnames(mat) <- sub("\\.[xy]$", "", colnames(mat))
+  # Transpose: cell types as rows, samples as columns
+  mat <- t(as.matrix(data[, cols]))
+  mat[mat > 2] <- 2; mat[mat < -2] <- -2
+  rownames(mat) <- sub("\\.[xy]$", "", rownames(mat))  # clean .x/.y
+  colnames(mat) <- data$ID
 
-  rownames(data) <- data$ID
-  ann_row <- data.frame(Subtype = data[[subtype_col]], row.names = data$ID)
+  # Column annotation for samples
+  ann_col <- data.frame(Subtype = data[[subtype_col]], row.names = data$ID)
   subtypes <- sort(unique(data[[subtype_col]]))
-  sub_colors <- c("#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4")
+  sub_colors <- c("#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B6")
   ann_colors <- list(Subtype = setNames(sub_colors[seq_along(subtypes)], subtypes))
 
-  # Gaps between subtype groups
+  # Gaps between subtype groups (columns now, not rows)
   gaps <- cumsum(table(data[[subtype_col]]))[-length(subtypes)]
 
   for (fmt in c("pdf", "png")) {
-    pheatmap::pheatmap(mat, annotation_row = ann_row, annotation_colors = ann_colors,
+    pheatmap::pheatmap(mat, annotation_col = ann_col, annotation_colors = ann_colors,
       color = colorRampPalette(c("#2166AC", "white", "#B2182B"))(100),
-      show_rownames = FALSE, cluster_cols = TRUE, cluster_rows = FALSE,
-      gaps_row = gaps, main = title,
+      show_colnames = FALSE, cluster_rows = TRUE, cluster_cols = FALSE,
+      gaps_col = gaps, fontsize_row = 8, main = title,
       filename = paste0("04-figs/", prefix, ".", fmt), width = width, height = height, dpi = 300)
   }
 }
