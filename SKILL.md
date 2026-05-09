@@ -287,39 +287,162 @@ tme_clusters <- tme_cluster(input = tme_result, features = cell_types,
                              id = "sample_id", method = "kmeans")
 ```
 
-### Phase 4: Statistical Analysis and Modeling
+### Phase 4: Batch Statistical Analysis
 
 **Script**: `04-statistical_analysis.R`
 
+IOBR provides powerful **batch** statistical functions — always prefer these over writing custom loops.
+
+#### 4.1 Batch Survival Analysis
+
+| Function | Purpose |
+|----------|---------|
+| `batch_surv()` | Batch Cox regression — hazard ratios and CIs for multiple variables |
+| `subgroup_survival()` | Subgroup Cox analysis — extract HR/CI from coxph by subgroups |
+| `sig_forest()` | Forest plot visualizing `batch_surv()` results |
+
 ```r
-# DEG between TME subtypes
-deg_result <- find_markers_in_bulk(pdata = pdata, eset = eset, group = "tme_subtype")
+# Batch survival: test all TME variables against OS
+surv_res <- batch_surv(pdata = pdata, tme_data = tme_result,
+                        time = "OS_time", status = "OS_status")
 
-# GSEA
-gsea_result <- sig_gsea(genesets = signature_collection[sig_group$hallmark],
-                         gene_symbol = deg_result$gene, logfc = deg_result$log2FC, org = "hsa")
+# Subgroup survival (e.g., by stage, age group)
+sub_res <- subgroup_survival(pdata = pdata, variable = "T_cells_CD8_CIBERSORT",
+                              group = "stage", time = "OS_time", status = "OS_status")
 
-# Ligand-receptor
-lr_result <- LR_cal(eset = eset, pdata = pdata, group = "tme_subtype", species = "human")
-
-# Survival (if clinical data available)
-surv_result <- batch_surv(pdata = pdata, tme_data = tme_result,
-                           time = "OS_time", status = "OS_status")
-
-# Mutation-TME interaction (TCGA only)
-mut_tme <- find_mutations(mutation_matrix = mut_matrix, signature_matrix = tme_result, method = "wilcoxon")
+# Forest plot
+sig_forest(surv_res, ...)
 ```
+
+#### 4.2 Batch Correlation Analysis
+
+| Function | Purpose |
+|----------|---------|
+| `batch_cor()` | Batch Pearson/Spearman correlation between two sets of continuous variables |
+| `batch_pcc()` | Batch partial correlation controlling for a third variable |
+| `iobr_cor_plot()` | Visualize batch correlation results (signature vs signature/phenotype) |
+| `get_cor()` | Single pairwise correlation with scatter plot |
+| `get_cor_matrix()` | Correlation matrix heatmap between two variable sets |
+
+```r
+# Batch Spearman correlation: cell fractions vs signature scores
+cor_res <- batch_cor(data = merged_data,
+                      variable1 = cell_cols, variable2 = sig_cols,
+                      method = "spearman")
+
+# Partial correlation: control for tumor purity
+pcc_res <- batch_pcc(data = merged_data, target = sig_cols,
+                      variable = cell_cols, control = "TumorPurity_ESTIMATE")
+
+# Correlation heatmap visualization
+iobr_cor_plot(data = merged_data, signature = sig_group$immu_microenvironment,
+              target = cell_cols, method = "spearman")
+
+# Single correlation with scatter plot
+get_cor(data = merged_data, variable1 = "T_cells_CD8_CIBERSORT",
+        variable2 = "CD_8_T_effector", method = "spearman")
+
+# Correlation matrix
+get_cor_matrix(data = merged_data, variable1 = cell_cols, variable2 = sig_cols)
+```
+
+#### 4.3 Batch Differential Analysis
+
+| Function | Purpose |
+|----------|---------|
+| `batch_wilcoxon()` | Batch Wilcoxon rank-sum test — compare features between two groups |
+| `iobr_deg()` | Differential expression using DESeq2 or limma, with volcano/heatmap output |
+| `find_markers_in_bulk()` | Multi-group marker finding via Seurat methods |
+
+```r
+# Batch Wilcoxon: compare cell fractions between TME subtypes
+wilcox_res <- batch_wilcoxon(data = merged_data, feature = cell_cols,
+                              variable = "TME_subtype",
+                              group1 = "C1", group2 = "C2")
+
+# Differential expression (RNA-seq: DESeq2; Array: limma)
+deg_res <- iobr_deg(eset = eset, pdata = pdata, group = "TME_subtype",
+                     method = "limma", pvalue_cutoff = 0.05, log2fc_cutoff = 1)
+
+# Multi-group markers
+markers <- find_markers_in_bulk(pdata = pdata, eset = eset, group = "TME_subtype")
+```
+
+#### 4.4 GSEA and Pathway Analysis
+
+| Function | Purpose |
+|----------|---------|
+| `sig_gsea()` | Gene Set Enrichment Analysis via fgsea, with visualization |
+
+```r
+gsea_res <- sig_gsea(genesets = hallmark, gene_symbol = deg_res$gene,
+                      logfc = deg_res$log2FC, org = "hsa")
+```
+
+#### 4.5 Other Analyses
+
+| Function | Purpose |
+|----------|---------|
+| `LR_cal()` | Ligand-receptor interaction analysis |
+| `find_mutations()` | Mutation-TME interaction (TCGA only) |
+| `feature_manipulation()` | Clean features: remove NA, outliers, zero-variance |
+| `format_signatures()` | Prepare custom signature list for `calculate_sig_score()` |
+| `format_msigdb()` | Convert MSigDB GMT files to IOBR signature format |
+| `get_sig_sc()` | Extract top markers from single-cell DE for `calculate_sig_score()` |
 
 ### Phase 5: Visualization
 
 **Script**: `05-visualization.R`
 
 Every figure MUST:
-1. Use `design_mytheme()` as the ggplot theme — adjust `size` parameters to keep text readable (typically `axis.text.x = element_text(size=8)`, `axis.title = element_text(size=10)`, `plot.title = element_text(size=11)`)
+1. Use IOBR's built-in visualization functions whenever available — do NOT write custom ggplot code for plots that IOBR already provides
 2. Choose palettes from IOBR's built-in options
 3. Export as **both** PNG (300dpi) + PDF
 
-#### IOBR Palettes
+#### 5.1 Complete IOBR Visualization Function Catalog
+
+##### TME Composition
+| Function | Purpose | Key Parameters |
+|----------|---------|---------------|
+| `cell_bar_plot()` | Stacked bar of cell fractions (CIBERSORT/EPIC/quanTIseq) | `input, id, features, pattern, coord_flip, palette` |
+| `percent_bar_plot()` | Stacked percentage bar plot | `input, x, y, color, palette, add_Freq` |
+
+##### Boxplots / Comparison
+| Function | Purpose | Key Parameters |
+|----------|---------|---------------|
+| `sig_box()` | Boxplot with statistical comparisons (Wilcoxon/t-test/Kruskal) | `data, signature, variable, method` |
+
+##### Heatmaps
+| Function | Purpose | Key Parameters |
+|----------|---------|---------------|
+| `sig_heatmap()` | Comprehensive heatmap with grouping, scaling, annotation | `input, group, palette, scale, cluster` |
+
+##### Correlation
+| Function | Purpose | Key Parameters |
+|----------|---------|---------------|
+| `get_cor()` | Scatter plot with regression line for single pair | `data, variable1, variable2, method` |
+| `get_cor_matrix()` | Correlation matrix heatmap between variable sets | `data, variable1, variable2, method` |
+| `iobr_cor_plot()` | Batch correlation visualization (signature vs signature/phenotype) | `data, signature, target, method` |
+
+##### Survival
+| Function | Purpose | Key Parameters |
+|----------|---------|---------------|
+| `sig_surv_plot()` | Kaplan-Meier curves for multiple signatures/genes | `pdata, signature, time, status` |
+| `sig_forest()` | Forest plot for batch_surv results | `input` (from batch_surv) |
+| `roc_time()` | Time-dependent ROC with AUC annotation | `pdata, signature, time, status, time_point` |
+| `sig_roc()` | Multiple ROC curves for binary prediction | `pdata, signature, response` |
+
+##### Dimensionality Reduction
+| Function | Purpose | Key Parameters |
+|----------|---------|---------------|
+| `iobr_pca()` | PCA scatter plot | `eset, pdata, group, scale` |
+
+##### DEG / Volcano
+| Function | Purpose | Key Parameters |
+|----------|---------|---------------|
+| `iobr_deg()` | DEG with built-in volcano plot and heatmap output | `eset, pdata, group, method, pvalue_cutoff, log2fc_cutoff` |
+
+#### 5.2 IOBR Palettes
 
 **Categorical** (`palette_group` parameter):
 | Name | Best For |
@@ -346,20 +469,6 @@ Every figure MUST:
 | 1–3 | Alternative random palettes |
 
 If unsure which palette, present 3 options to the user and ask.
-
-#### Key visualization functions:
-
-```r
-sig_box(...)          # Boxplot with stats
-sig_heatmap(...)      # Comprehensive heatmap
-percent_bar_plot(...)  # Stacked percentage bar
-cell_bar_plot(...)     # Cell fraction bar
-get_cor(...)           # Scatter correlation
-get_cor_matrix(...)    # Correlation matrix
-sig_forest(...)        # Forest plot (Cox)
-sig_surv_plot(...)     # Kaplan-Meier
-roc_time(...)          # Time-dependent ROC
-```
 
 #### cell_bar_plot() — Cell Fraction Stacked Bar Plot
 

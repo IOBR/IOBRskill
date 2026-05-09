@@ -12,6 +12,12 @@ count2tpm(countMat, idType = "Ensembl", org = "hsa", source = "local")
 - `org`: `"hsa"` (human) or `"mmu"` (mouse)
 - `source`: `"local"` (cached gene length) or `"online"` (download)
 
+### `log2eset()`
+Auto-detect and apply log2 transformation if data is not already log-scaled.
+```r
+log2eset(eset)
+```
+
 ### `anno_eset()`
 Annotate expression matrix with gene symbols.
 ```r
@@ -81,7 +87,7 @@ Method-specific parameters:
 ### `calculate_sig_score()`
 Calculate gene signature scores per sample.
 ```r
-calculate_sig_score(pdata, eset, signature, method = "ssgsea",
+calculate_sig_score(pdata = NULL, eset, signature, method = "ssgsea",
                     mini_gene_count = 3, adjust_eset = TRUE)
 ```
 
@@ -92,6 +98,18 @@ format_signatures(file, sheet = 1)
 ```
 - Input: CSV or Excel with columns: signature_name, gene
 
+### `format_msigdb()`
+Convert MSigDB GMT files to IOBR signature format for `calculate_sig_score()`.
+```r
+format_msigdb(gmt_file)
+```
+
+### `get_sig_sc()`
+Extract top markers from single-cell DE results for `calculate_sig_score()`.
+```r
+get_sig_sc(sc_markers_matrix, ...)
+```
+
 ### `tme_cluster()`
 Cluster samples based on TME cell composition.
 ```r
@@ -100,47 +118,68 @@ tme_cluster(input, features, id = "sample_id", scale = TRUE,
 ```
 - `method`: `"kmeans"`, `"hclust"`, `"consensus"`
 
-### `LR_cal()`
-Ligand-receptor interaction analysis.
-```r
-LR_cal(eset, pdata, group, species = "human")
-```
-
 ---
 
-## Statistical Functions
+## Batch Statistical Analysis Functions
 
-### `find_markers_in_bulk()`
-Differential expression between groups.
+### `batch_surv()`
+Batch survival analysis — Cox regression for multiple variables.
 ```r
-find_markers_in_bulk(pdata, eset, group, nfeatures = 50,
-                     top_n = 100, thresh.use = 0.25)
+batch_surv(pdata, tme_data, time, status, method = "cox")
+```
+- Returns hazard ratios, confidence intervals, p-values for all variables.
+
+### `subgroup_survival()`
+Subgroup Cox analysis — extract HR/CI within subgroups.
+```r
+subgroup_survival(pdata, variable, group, time, status)
 ```
 
+### `batch_cor()`
+Batch correlation analysis between two sets of continuous variables.
+```r
+batch_cor(data, variable1, variable2, method = "spearman")
+```
+- `method`: `"pearson"` or `"spearman"`
+
+### `batch_pcc()`
+Batch partial correlation coefficient — control for a third variable.
+```r
+batch_pcc(data, target, variable, control)
+```
+
+### `batch_wilcoxon()`
+Batch Wilcoxon rank-sum test — compare feature distributions between two groups.
+```r
+batch_wilcoxon(data, feature, variable, group1, group2)
+```
+- Returns data frame: feature, p-value, adjusted p-value, -log10(p), star rating.
+
 ### `iobr_deg()`
-Differential expression analysis (limma or DESeq2).
+Differential expression analysis (limma or DESeq2), with built-in volcano and heatmap.
 ```r
 iobr_deg(eset, pdata, group_id, array = TRUE,
          padj_cutoff = 0.05, logfc_cutoff = 1)
 ```
 
+### `find_markers_in_bulk()`
+Multi-group marker finding via Seurat methods.
+```r
+find_markers_in_bulk(pdata, eset, group, nfeatures = 50,
+                     top_n = 100, thresh.use = 0.25)
+```
+
 ### `sig_gsea()`
-Gene Set Enrichment Analysis.
+Gene Set Enrichment Analysis via fgsea.
 ```r
 sig_gsea(genesets, gene_symbol, logfc, org = "hsa",
          msigdb = TRUE, category = "H", subcategory = NULL)
 ```
 
-### `batch_surv()`
-Batch survival analysis across multiple features.
+### `LR_cal()`
+Ligand-receptor interaction analysis.
 ```r
-batch_surv(pdata, tme_data, time, status, method = "cox")
-```
-
-### `batch_cor()`
-Batch correlation analysis.
-```r
-batch_cor(x, y, method = "spearman")
+LR_cal(eset, pdata, group, species = "human")
 ```
 
 ### `find_mutations()`
@@ -150,67 +189,116 @@ find_mutations(mutation_matrix, signature_matrix, signature = NULL,
                method = "wilcoxon", min_mut_freq = 0.02)
 ```
 
+### `feature_manipulation()`
+Clean features: remove missing values, outliers, zero-variance variables.
+```r
+feature_manipulation(data, ...)
+```
+
 ---
 
 ## Visualization Functions
 
-### `sig_box()`
-Boxplots with statistical testing.
-```r
-sig_box(pdata, signature, variable, palette_group = "jama",
-        show_pvalue = TRUE, method = "wilcox.test")
-```
+### TME Composition
 
-### `sig_heatmap()`
-Comprehensive heatmap with annotations.
+### `cell_bar_plot()`
+Stacked bar plot for cell fractions (CIBERSORT/EPIC/quanTIseq).
 ```r
-sig_heatmap(pdata, signature, scale = TRUE, palette = 2,
-            palette_group = "jama", size_row = 8,
-            custom_cols = NULL, custom_heatmap_cols = NULL)
+cell_bar_plot(input, id = "ID", title = "Cell Fraction", features = NULL,
+              pattern = NULL, legend.position = "bottom", coord_flip = TRUE,
+              palette = 3, show_col = FALSE, cols = NULL)
 ```
+- Use `features` to specify cell columns; filter out QC columns (P.value/Correlation/RMSE).
 
 ### `percent_bar_plot()`
 Stacked percentage bar plot.
 ```r
-percent_bar_plot(data, palette_group = "jama")
+percent_bar_plot(input, x, y, subset.x = NULL, color = NULL, palette = NULL,
+                 title = NULL, axis_angle = 0, coord_flip = FALSE,
+                 add_Freq = TRUE, add_sum = TRUE, round.num = 2)
 ```
 
-### `cell_bar_plot()`
-Cell fraction bar plot.
+### Boxplots
+
+### `sig_box()`
+Boxplot with statistical comparisons (Wilcoxon/t-test/Kruskal).
 ```r
-cell_bar_plot(data, palette_group = "jama")
+sig_box(data, signature, variable, palette_group = "jama",
+        show_pvalue = TRUE, method = "wilcox.test")
 ```
+
+### Heatmaps
+
+### `sig_heatmap()`
+Comprehensive heatmap with grouping, scaling, annotation.
+```r
+sig_heatmap(input, group, scale = TRUE, palette = 2,
+            palette_group = "jama", size_row = 8,
+            custom_cols = NULL, custom_heatmap_cols = NULL)
+```
+
+### Correlation
 
 ### `get_cor()`
-Scatter plot with correlation and regression.
+Scatter plot with correlation and regression line for a single pair.
 ```r
-get_cor(x, y, method = "spearman", palette = "jama")
+get_cor(data, variable1, variable2, method = "spearman")
 ```
 
 ### `get_cor_matrix()`
-Correlation matrix heatmap.
+Correlation matrix heatmap between two variable sets.
 ```r
-get_cor_matrix(data, method = "spearman", palette = 2)
+get_cor_matrix(data, variable1, variable2, method = "spearman", palette = 2)
 ```
 
-### `sig_forest()`
-Forest plot for Cox regression.
+### `iobr_cor_plot()`
+Batch correlation visualization — signature vs signature/phenotype.
 ```r
-sig_forest(pdata, signature, time, status)
+iobr_cor_plot(data, signature, target, method = "spearman")
 ```
+
+### Survival
 
 ### `sig_surv_plot()`
-Kaplan-Meier survival curves.
+Kaplan-Meier curves for multiple signatures/genes.
 ```r
 sig_surv_plot(pdata, signature, time, status, group = NULL,
               palette_group = "jama")
 ```
 
-### `roc_time()`
-Time-dependent ROC curves.
+### `sig_forest()`
+Forest plot for batch_surv results.
 ```r
-roc_time(pdata, signature, time, status,
-         time_point = c(12, 36, 60))
+sig_forest(input)  # input = batch_surv() output
+```
+
+### `roc_time()`
+Time-dependent ROC curves with AUC annotation.
+```r
+roc_time(pdata, signature, time, status, time_point = c(12, 36, 60))
+```
+
+### `sig_roc()`
+Multiple ROC curves for binary response prediction.
+```r
+sig_roc(pdata, signature, response)
+```
+
+### Dimensionality Reduction
+
+### `iobr_pca()` (visualization mode)
+PCA scatter plot.
+```r
+iobr_pca(pdata, eset, group, scale = TRUE)
+```
+
+### DEG / Volcano
+
+### `iobr_deg()` (with visualization)
+DEG with built-in volcano plot and heatmap output.
+```r
+iobr_deg(eset, pdata, group_id, array = TRUE,
+         padj_cutoff = 0.05, logfc_cutoff = 1)
 ```
 
 ---
