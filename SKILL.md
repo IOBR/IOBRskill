@@ -698,12 +698,20 @@ plot_subtype_heatmap(mcp_hm, mcp_sc, "TME_subtype",
 
 #### Fig 05: TME Correlation Matrix Heatmap
 
-```r
-cor_res <- read.csv("04-figs/data/06-cor_matrix.csv")
+Use `pheatmap` on the correlation matrix saved in Phase 4. **Must deduplicate** — cibersort + cibersort_abs share cell names, so `.y` columns duplicate `.x`. Keep only `.x`, drop `.y`, clean suffix for display.
 
-get_cor_matrix(data = tme_pdata, variable1 = cell_cols, variable2 = cell_cols,
-               method = "spearman", palette = 2)
-# Save to Fig05-cor_matrix
+```r
+load("04-figs/data/06-cor_matrix_full.RData")
+
+# Deduplicate: keep .x (cibersort), drop .y (cibersort_abs)
+keep <- !grepl("\\.[xy]$", rownames(cor_mat)) | grepl("\\.x$", rownames(cor_mat))
+cor_mat <- cor_mat[keep, keep]
+rownames(cor_mat) <- sub("\\.x$", "", rownames(cor_mat))
+colnames(cor_mat) <- sub("\\.x$", "", colnames(cor_mat))
+
+pheatmap::pheatmap(cor_mat, fontsize = 6, fontsize_row = 5, fontsize_col = 5,
+                    color = colorRampPalette(c("#2166AC", "white", "#B2182B"))(100),
+                    border_color = NA, main = "TME Cell Correlation Matrix")
 ```
 
 #### Fig 06: Top 10 Wilcoxon Boxplots — 2×5 patchwork Composite
