@@ -442,13 +442,19 @@ tme   <- read.csv("03-tme/tme_combine.csv")
 tme_pdata <- merge(pdata, tme, by = "ID")
 write.csv(tme_pdata, file = "04-figs/data/01-tme_pdata_merged.csv", row.names = FALSE)
 
-# Identify TME cell columns (exclude QC metrics)
-qc_patterns <- c("^P[.]", "^Correlation", "^RMSE", "^ID")
-cell_cols   <- colnames(tme_pdata)[!grepl(paste(qc_patterns, collapse = "|"), colnames(tme_pdata))]
+# Collect TME cell columns — MUST match actual column names in merged data
+# After merge, cibersort + cibersort_abs shared names get .x/.y suffixes
+# So match by checking actual colname OR colname-without-suffix against original list
+qc_patterns <- c("^P[.]", "^Correlation", "^RMSE")
+all_tme_cell_cols <- colnames(tme_pdata)[
+  colnames(tme_pdata) %in% original_cell_cols |
+  gsub("\\.[xy]$", "", colnames(tme_pdata)) %in% original_cell_cols
+]
+all_tme_cell_cols <- setdiff(all_tme_cell_cols, "ID")
 
-# Z-score scale all TME cell columns
+# Z-score scale all TME cell columns (per column = per variable)
 tme_scaled <- tme_pdata
-tme_scaled[, cell_cols] <- scale(tme_scaled[, cell_cols])
+tme_scaled[, all_tme_cell_cols] <- scale(tme_scaled[, all_tme_cell_cols])
 write.csv(tme_scaled, file = "04-figs/data/02-tme_scaled.csv", row.names = FALSE)
 ```
 
@@ -739,8 +745,11 @@ make_forest <- function(data, title, filename, max_n = 20) {
   data <- data[complete.cases(data[, c("HR", "CI_low_0.95", "CI_up_0.95", "P")]), ]
   if (nrow(data) == 0) return()
 
-  # Format display labels
-  data$label <- strtrim(data$ID, 30)
+  # Format display labels — clean .x/.y suffix and deduplicate
+  data$label <- sub("\\.[xy]$", "", data$ID)
+  data$label <- strtrim(data$label, 30)
+  dup <- duplicated(data$label)
+  if (any(dup)) data$label[dup] <- paste0(data$label[dup], "_", seq_len(sum(dup)))
   data <- data[order(data$HR, decreasing = FALSE), ]
   data$label <- factor(data$label, levels = data$label)
 
