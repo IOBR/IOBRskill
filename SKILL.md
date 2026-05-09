@@ -691,9 +691,11 @@ ggsave("04-figs/Fig06-top10_wilcoxon_boxplot.pdf", p_combined,
 
 **Note**: `sig_box()` parameter is `palette` (not `palette_group`), and has no `method` parameter — statistical test is auto-selected.
 
-#### Fig 07a-d: Forest Plots — Grouped by Method
+#### Fig 07a-d: Forest Plots — Grouped by Method (Custom ggplot2)
 
-Split survival forest plots into method groups to improve readability and avoid extreme HR values dominating the display:
+**CRITICAL**: Do NOT use `sig_forest()` for survival forest plots. It uses `coord_trans(x = "log2")` with only 3 fixed breaks (0.5, 1, 1.5), which breaks when HR values span extreme ranges (0 to 1,000,000+). Use a custom ggplot2 forest plot instead.
+
+Split into 4 method groups and build custom forest plots with log2 scale, text annotations (HR, 95% CI, P value), and proper handling of extreme values:
 
 ```r
 surv_tme <- read.csv("04-figs/data/05-surv_tme_cells.csv")
@@ -702,25 +704,75 @@ surv_sig <- read.csv("04-figs/data/05-surv_signatures.csv")
 make_forest <- function(data, title, filename, max_n = 20) {
   data <- data[order(data$P), ]
   data <- head(data, max_n)
+  if (nrow(data) == 0) { cat("  Skipping:", title, "\n"); return() }
+
+  # Ensure numeric + complete cases
+  for (col in c("HR", "CI_low_0.95", "CI_up_0.95", "P"))
+    data[[col]] <- as.numeric(data[[col]])
+  data <- data[complete.cases(data[, c("HR", "CI_low_0.95", "CI_up_0.95", "P")]), ]
   if (nrow(data) == 0) return()
-  tryCatch({
-    p <- sig_forest(data = data, signature = "ID", n = max_n,
-                     text.size = 10, max_character = 30)
-    p <- p + ggtitle(title) + theme(plot.title = element_text(size = 12, hjust = 0.5))
-    ggsave(paste0("04-figs/", filename, ".png"), p, width = 10, height = 7, units = "in", dpi = 300)
-    ggsave(paste0("04-figs/", filename, ".pdf"), p, width = 10, height = 7)
-  }, error = function(e) cat("Forest error:", conditionMessage(e), "\n"))
+
+  # Format display labels
+  data$label <- strtrim(data$ID, 30)
+  data <- data[order(data$HR, decreasing = FALSE), ]
+  data$label <- factor(data$label, levels = data$label)
+
+  # Format text columns
+  data$HR_text <- ifelse(data$HR >= 100, sprintf("%.0f", data$HR),
+                  ifelse(data$HR >= 0.01, sprintf("%.2f", data$HR), sprintf("%.4f", data$HR)))
+  data$CI_text <- paste0(
+    ifelse(data$CI_low_0.95 >= 100, sprintf("%.0f", data$CI_low_0.95),
+    ifelse(data$CI_low_0.95 >= 0.01, sprintf("%.2f", data$CI_low_0.95), sprintf("%.4f", data$CI_low_0.95))),
+    "-",
+    ifelse(data$CI_up_0.95 >= 100, sprintf("%.0f", data$CI_up_0.95),
+    ifelse(data$CI_up_0.95 >= 0.01, sprintf("%.2f", data$CI_up_0.95), sprintf("%.4f", data$CI_up_0.95))))
+  data$P_text <- ifelse(data$P < 0.001, sprintf("%.2e", data$P), sprintf("%.3f", data$P))
+
+  # Log2 transform with cap for extreme values
+  cap <- 10
+  data$logHR    <- log2(data$HR);       data$logHR[!is.finite(data$logHR)] <- 0
+  data$logCI_low <- log2(data$CI_low_0.95); data$logCI_low[!is.finite(data$logCI_low)] <- -cap
+  data$logCI_up  <- log2(data$CI_up_0.95);  data$logCI_up[!is.finite(data$logCI_up)]   <-  cap
+  data$logCI_low <- pmax(data$logCI_low, -cap)
+  data$logCI_up  <- pmin(data$logCI_up,   cap)
+
+  # Build ggplot
+  p <- ggplot(data, aes(x = logHR, y = label)) +
+    geom_errorbarh(aes(xmin = logCI_low, xmax = logCI_up),
+                   height = 0.2, linewidth = 0.8, color = "grey30") +
+    geom_point(aes(color = P), size = 3.5) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "grey50", linewidth = 0.5) +
+    scale_color_gradientn(colors = c("#B2182B", "#EF8A62", "#FDDBC7", "#D1E5F0", "#2166AC"),
+                          name = "P value", trans = "log10") +
+    geom_text(aes(x = cap + 1.5, label = HR_text), hjust = 0, size = 2.5) +
+    geom_text(aes(x = cap + 4.5, label = CI_text), hjust = 0, size = 2.5, color = "grey30") +
+    geom_text(aes(x = cap + 9.5, label = P_text), hjust = 0, size = 2.5, color = "grey30") +
+    annotate("text", x = cap + 1.5, y = nrow(data) + 1.5, label = "HR", hjust = 0, size = 2.5, fontface = "bold") +
+    annotate("text", x = cap + 4.5, y = nrow(data) + 1.5, label = "95% CI", hjust = 0, size = 2.5, fontface = "bold") +
+    annotate("text", x = cap + 9.5, y = nrow(data) + 1.5, label = "P value", hjust = 0, size = 2.5, fontface = "bold") +
+    scale_x_continuous(breaks = c(-8,-4,-2,-1,0,1,2,4,8),
+                       labels = c("1/256","1/16","1/4","0.5","1","2","4","16","256")) +
+    coord_cartesian(xlim = c(-cap, cap + 13), clip = "off") +
+    labs(x = "Hazard Ratio (log2 scale)", y = "", title = title) +
+    theme_light() + theme(
+      axis.text.y = element_text(size = 7), axis.text.x = element_text(size = 7),
+      plot.title = element_text(size = 10, hjust = 0.5, face = "bold"),
+      legend.position = "bottom", plot.margin = margin(5, 40, 5, 5, "mm"))
+
+  plot_h <- max(4, nrow(data) * 0.4 + 1.5)
+  ggsave(paste0("04-figs/", filename, ".png"), p, width = 12, height = plot_h, units = "in", dpi = 300)
+  ggsave(paste0("04-figs/", filename, ".pdf"), p, width = 12, height = plot_h)
 }
 
-# 07a: CIBERSORT (includes cibersort + cibersort_abs)
+# 07a: CIBERSORT
 cb_surv <- surv_tme[grepl("CIBERSORT", surv_tme$ID), ]
 make_forest(cb_surv, "CIBERSORT Survival Forest", "Fig07a-forest_cibersort")
 
-# 07b: Other TME methods (MCPcounter, EPIC, quanTIseq, ESTIMATE, IPS, etc.)
+# 07b: Other TME methods
 other_surv <- surv_tme[!grepl("CIBERSORT", surv_tme$ID), ]
 make_forest(other_surv, "Other TME Methods Survival Forest", "Fig07b-forest_other_tme")
 
-# 07c: TME signatures (from signature_collection, excluding GO/KEGG/Hallmark)
+# 07c: TME signatures (non-GO/KEGG)
 gkegg_pattern <- "^HALLMARK_|^KEGG_|^GO_|^REACTOME_"
 tme_sig_surv <- surv_sig[!grepl(gkegg_pattern, surv_sig$ID), ]
 make_forest(tme_sig_surv, "TME Signatures Survival Forest", "Fig07c-forest_tme_signature")
@@ -731,10 +783,9 @@ make_forest(gkegg_surv, "Pathway Survival Forest", "Fig07d-forest_go_kegg")
 ```
 
 **Key notes:**
-- **Split into groups** because mixing extreme HR values (e.g., CIBERSORT_abs ~123000) with normal values causes display issues in `sig_forest()`.
-- **`sig_forest()` signature parameter** — A **column name** in `data` (e.g., `"ID"`), not a vector of names.
-- **`sig_forest()` expects specific column names**: `P`, `HR`, `CI_low_0.95`, `CI_up_0.95` — these come from `batch_surv()` output.
-- **Use `tryCatch`** — some groups may have 0 significant results.
+- **Do NOT use `sig_forest()`** — it only has 3 fixed axis breaks (0.5, 1, 1.5) and breaks with extreme HR values. Custom ggplot2 forest plot handles all cases.
+- **Custom forest plot features**: log2 scale with 9 breaks, text annotations for HR/CI/P, capped error bars for extreme values, dynamic plot height.
+- **Split into 4 groups** (07a-d) for readability: CIBERSORT, Other TME, TME Signatures, GO/KEGG/Hallmark.
 
 #### Fig 08: KM Plots — p<0.005 Significant Variables
 
